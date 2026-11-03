@@ -29,6 +29,7 @@ from typing import Annotated, Literal
 import numpy as np
 from pydantic import Field
 
+from robots.robocasa.depth_geometry import CAMERA_GEOMETRY_IMAGES, load_geometry
 from robots.robocasa.primitives import RoboCasaPrimitives
 from rpent.session import EnvState, StepRecord
 from rpent.tools import ToolResult
@@ -39,13 +40,9 @@ from rpent.tools.base import tool
 # Heavy npy artifacts pruned after the ``_keep_heavy`` window elapses (the
 # agent localizes from the latest frame; old world/depth maps are dead weight
 # that once filled the 100GB root and deadlocked everything).
-_HEAVY_ARTIFACTS = (
-    "agentview_depth.npz",
-    "agentview_world.npz",
-    "wrist_depth.npz",
-    "wrist_world.npz",
-    "agentview_world_high.npz",
-    "navview_world.npz",
+_HEAVY_ARTIFACTS = tuple(
+    f"{prefix}_depth_predicted.npz"
+    for prefix in ("agentview", "agentview_high", "wrist", "navview")
 )
 
 # Artifact base names exposed to the agent for each camera (high-res first).
@@ -53,13 +50,6 @@ _CAMERA_IMAGE_ARTIFACTS = {
     "agentview": ("agentview_high.png", "agentview.png"),
     "navview": ("navview.png",),
     "wrist": ("wrist_high.png", "wrist.png"),
-}
-
-# Camera -> (low-res world map artifact, high-res world map artifact or None)
-_CAMERA_WORLD_ARTIFACTS = {
-    "agentview": ("agentview_world.npz", "agentview_world_high.npz"),
-    "navview": ("navview_world.npz", None),
-    "wrist": ("wrist_world.npz", None),
 }
 
 
@@ -71,8 +61,8 @@ def dump_state(
     """Record one RoboCasa observation through its owned state record.
 
     Appends a new :class:`StepRecord` (proprio + task + success + vla_desync)
-    via :meth:`EnvState.record_step`, saves the rendered RGB / depth / world
-    artifacts for that step, and prunes heavy npy artifacts that fell out of
+    via :meth:`EnvState.record_step`, saves RGB and contemporaneous camera calibration
+    for that step, and prunes predicted depth artifacts that fell out of
     the ``_keep_heavy`` window.
     """
     state_dict = primitives.current_state_dict()
@@ -107,50 +97,23 @@ def _save_observation_artifacts(
     env = primitives.env
     hi_res = primitives.hi_res
 
-    # ---- agentview + wrist: rgb, depth, world map, camera meta ----
-    for cam, image_name, depth_name, world_name, meta_name in (
-        (
-            "agentview",
-            "agentview.png",
-            "agentview_depth.npz",
-            "agentview_world.npz",
-            "agentview_metadata.json",
-        ),
-        (
-            "wrist",
-            "wrist.png",
-            "wrist_depth.npz",
-            "wrist_world.npz",
-            "wrist_metadata.json",
-        ),
-    ):
-        rgb, depth = env.render_camera(cam, depth=True)
-        env_state.save(image_name, rgb, step=step_idx)
-        env_state.save(depth_name, depth.astype(np.float32), step=step_idx)
-        env_state.save(world_name, env.world_map(cam).astype(np.float32), step=step_idx)
-        if cam not in primitives._cam_meta_cache or cam == "wrist":
-            primitives._cam_meta_cache[cam] = env.get_camera_meta(cam)
-        env_state.save(meta_name, primitives._cam_meta_cache[cam], step=step_idx)
-
-    # ---- hi-res agentview (SAM grounding / fine localize) ----
-    if hi_res:
-        hrgb, _ = env.render_camera("agentview", hi_res, hi_res, depth=True)
-        env_state.save("agentview_high.png", hrgb, step=step_idx)
+    # Capture RGB and known K/pose only. Geometry is predicted lazily on query.
+    # Every camera pose must be refreshed: the base and wrist can move.
+    for camera in ("agentview", "wrist", "navview"):
+        rgb = env.render_camera(camera, depth=False)
+        env_state.save(f"{camera}.png", rgb, step=step_idx)
         env_state.save(
-            "agentview_world_high.npz",
-            env.world_map("agentview", hi_res, hi_res).astype(np.float16),
-            step=step_idx,
+            f"{camera}_metadata.json", env.get_camera_meta(camera), step=step_idx
         )
 
-    # ---- navview: base-mounted forward-down floor camera (follows the base) ----
-    nrgb, _ = env.render_camera("navview", depth=True)
-    nworld = env.world_map("navview").astype(np.float32)
-    env_state.save("navview.png", nrgb, step=step_idx)
-    env_state.save("navview_world.npz", nworld, step=step_idx)
-    floor = (nworld[:, :, 2] < 0.12) & (nworld[:, :, 2] > -0.2)
-    overlay = nrgb.copy()
-    overlay[floor] = [0, 255, 0]
-    env_state.save("navview_floor.png", overlay, step=step_idx)
+    if hi_res:
+        rgb = env.render_camera("agentview", hi_res, hi_res, depth=False)
+        env_state.save("agentview_high.png", rgb, step=step_idx)
+        env_state.save(
+            "agentview_high_metadata.json",
+            env.get_camera_meta("agentview", hi_res, hi_res),
+            step=step_idx,
+        )
 
 
 # ---- tool handlers (perception tools read the recorded EnvState) ----
@@ -240,11 +203,11 @@ def back_project_batch(
     """
     camera = camera or "agentview"
     resolution = resolution or "low"
-    if camera not in _CAMERA_WORLD_ARTIFACTS:
+    if camera not in CAMERA_GEOMETRY_IMAGES:
         return ToolResult(
             data={"error": f"bad camera '{camera}' (use agentview, navview, or wrist)"}
         )
-    low_name, hi_name = _CAMERA_WORLD_ARTIFACTS[camera]
+    low_name, hi_name = CAMERA_GEOMETRY_IMAGES[camera]
     source_artifact = hi_name if resolution == "high" else low_name
     if source_artifact is None:
         return ToolResult(
@@ -266,10 +229,10 @@ def back_project_batch(
         )
 
     try:
-        world_map = state.load(source_artifact, step=nn)
+        geometry = load_geometry(state, step=nn, camera=camera, resolution=resolution)
     except Exception as exc:
         return ToolResult(
-            data={"error": f"{source_artifact} not found for step {nn}: {exc}"}
+            data={"error": f"depth geometry unavailable for step {nn}: {exc}"}
         )
 
     results = []
@@ -286,7 +249,7 @@ def back_project_batch(
             )
             continue
         row, col = int(pixel[0]), int(pixel[1])
-        h, w = world_map.shape[:2]
+        h, w = geometry.depth.shape
         if row < 0 or row >= h or col < 0 or col >= w:
             results.append(
                 {
@@ -297,7 +260,7 @@ def back_project_batch(
                 }
             )
             continue
-        xyz = world_map[row, col, :3]
+        xyz = geometry.xyz_at(row, col)
         if not np.isfinite(xyz).all() or abs(float(xyz.sum())) <= 1e-6:
             results.append(
                 {
@@ -373,11 +336,11 @@ def query_world_map(
         resolution: World map resolution (default low).
         min_cluster_size: Minimum pixels per cluster to report (default 10).
     """
-    if camera not in _CAMERA_WORLD_ARTIFACTS:
+    if camera not in CAMERA_GEOMETRY_IMAGES:
         return ToolResult(
             data={"error": f"bad camera '{camera}' (use agentview, navview, or wrist)"}
         )
-    low_name, hi_name = _CAMERA_WORLD_ARTIFACTS[camera]
+    low_name, hi_name = CAMERA_GEOMETRY_IMAGES[camera]
     source_artifact = hi_name if resolution == "high" else low_name
     if source_artifact is None:
         return ToolResult(
@@ -398,14 +361,11 @@ def query_world_map(
             }
         )
     try:
-        world_map = state.load(source_artifact, step=nn)
-    except Exception:
+        geometry = load_geometry(state, step=nn, camera=camera, resolution=resolution)
+        world_map = geometry.world_map()
+    except Exception as exc:
         return ToolResult(
-            data={
-                "error": (
-                    f"{camera} {resolution}-resolution world map not found for step {nn}"
-                )
-            }
+            data={"error": f"depth geometry unavailable for step {nn}: {exc}"}
         )
 
     z = world_map[:, :, 2]

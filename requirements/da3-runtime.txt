@@ -1,0 +1,12 @@
+# Incremental packages for the validated RoboCasa runtime; install with --no-deps.
+# The existing Torch, torchvision, NumPy and RLDX stack must already be installed.
+depth-anything-3 @ git+https://github.com/ByteDance-Seed/Depth-Anything-3.git@3d835ec1a5802d64a8b8b15f817a1ab54809bfe4
+addict==2.4.0
+evo==1.38.0
+e3nn==0.6.0
+opt-einsum-fx==0.1.4
+opt-einsum==3.4.0
+pillow-heif==1.8.1
+plyfile==1.1.3
+pycolmap==4.3.0.dev0
+trimesh==5.2.0

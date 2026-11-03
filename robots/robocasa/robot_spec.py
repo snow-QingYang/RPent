@@ -458,6 +458,7 @@ def _init_runtime(
             ),
             "workdir": str(output_dir),
             "hi_res": args.hi_res or None,
+            "depth_device": f"cuda:{args.cuda_device if args.cuda_device is not None else 0}",
         },
         "vla": lambda rpc: {"vla_client": RoboCasaVLAClient(rpc)},
     }

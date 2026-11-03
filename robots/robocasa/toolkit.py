@@ -186,7 +186,16 @@ class RoboCasaToolkit(Toolkit):
         runtime_kwargs: dict[str, Any],
     ) -> None:
         """Wipe stale run artifacts, build the primitives, dump step 0."""
+        runtime_kwargs = dict(runtime_kwargs)
+        depth_device = runtime_kwargs.pop("depth_device", "cuda:0")
         self._state.reset()
+        if (
+            self._state.save(
+                "depth_geometry_config.json", {"device": depth_device}, step=None
+            )
+            is None
+        ):
+            raise RuntimeError("failed to save depth geometry device configuration")
 
         from robots.robocasa.primitives import RoboCasaPrimitives
 

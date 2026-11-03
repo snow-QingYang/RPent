@@ -23,7 +23,10 @@ docs/build/
 build/
 .claude/settings.json
 .venv/
+/.local-setup/
 /.codex-rpent-live/
 
 # Standalone calibration environment.
 .venv-calibration/
+
+/runs/

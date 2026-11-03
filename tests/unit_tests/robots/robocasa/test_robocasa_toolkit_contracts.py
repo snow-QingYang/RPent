@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -97,11 +98,13 @@ def test_toolkit_falls_back_to_memory_root(
 
 
 @pytest.mark.parametrize("mode", ["evaluation", "exploration"])
+@pytest.mark.parametrize("depth_device", [None, "cuda:7"])
 def test_toolkit_constructs_and_classifies_tools_with_a_fake(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     fake_single_arm_primitives: type[Any],
     mode: str,
+    depth_device: str | None,
 ) -> None:
     monkeypatch.delenv("RLDX_MAX_CHUNKS", raising=False)
     monkeypatch.delenv("RLDX_SETTLE_PATIENCE", raising=False)
@@ -126,8 +129,13 @@ def test_toolkit_constructs_and_classifies_tools_with_a_fake(
         lambda primitives, state, log: dumped.append(primitives) or _record(),
     )
 
+    runtime_kwargs = {"env_client": object(), "vla_client": object()}
+    if depth_device is not None:
+        runtime_kwargs["depth_device"] = depth_device
+    original_kwargs = dict(runtime_kwargs)
+    (tmp_path / "depth_geometry_config.json").write_text('{"device": "cuda:4"}')
     robot_toolkit = toolkit.RoboCasaToolkit(
-        runtime_kwargs={"env_client": object(), "vla_client": object()},
+        runtime_kwargs=runtime_kwargs,
         dashboard_events=NullDashboardEventSink(),
         memory=MemoryManager(tmp_path / "memory"),
         mode=mode,
@@ -146,6 +154,45 @@ def test_toolkit_constructs_and_classifies_tools_with_a_fake(
     assert primitive.recording_started is True
     assert callable(primitive.kwargs["check_cancelled"])
     assert (tmp_path / "success_criteria.md").read_text() == "offline success criteria"
+    assert "depth_device" not in primitive.kwargs
+    assert runtime_kwargs == original_kwargs
+    assert json.loads((tmp_path / "depth_geometry_config.json").read_text()) == {
+        "device": depth_device or "cuda:0"
+    }
+
+
+@pytest.mark.parametrize("cuda_device", [None, 0, 7])
+def test_runtime_routes_depth_to_the_selected_gpu(monkeypatch, tmp_path, cuda_device):
+    from robots.robocasa import env_client
+
+    rpc = object()
+    monkeypatch.setattr(robot_spec, "_spawn_env_server", lambda *args: (None, rpc))
+    monkeypatch.setattr(
+        robot_spec,
+        "try_spawn_server",
+        lambda owned, events, component, starter: starter(),
+    )
+    monkeypatch.setattr(robot_spec, "try_wait_server", lambda *args, post_fn: post_fn())
+    monkeypatch.setattr(
+        env_client,
+        "RoboCasaEnvClient",
+        lambda rpc, **kwargs: SimpleNamespace(rpc=rpc, **kwargs),
+    )
+    args = SimpleNamespace(
+        task_name="OpenDrawer",
+        split="target",
+        seed=1,
+        hi_res=0,
+        cuda_device=cuda_device,
+    )
+
+    daemons, runtime_kwargs = robot_spec._init_runtime(
+        args, tmp_path, NullDashboardEventSink(), {"env"}
+    )
+
+    assert daemons == []
+    assert runtime_kwargs["env_client"].rpc is rpc
+    assert runtime_kwargs["depth_device"] == f"cuda:{cuda_device or 0}"
 
 
 def test_solved_reads_only_the_final_environment_record() -> None:
