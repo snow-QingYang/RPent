@@ -39,7 +39,7 @@ RULES = BulletList(
     [
         "Never hard-code world coordinates; localize from the latest world maps.",
         "After navigation or base motion, re-localize because the arm frame changed.",
-        "Inspect task_progress after every action; it is the environment's grounded feedback.",
+        "After every action, inspect the returned images, robot state, and tool results to assess progress toward the task.",
         "Do not interrupt consecutive VLA calls for one sub-operation with manual commands; doing so destroys VLA frame-history continuity.",
         "Pass the complete live task_language verbatim to every RLDX call, as required by the current RoboCasa adapter.",
         "Do not artificially shorten VLA calls. If a call reaches its cap, call it again with the same prompt while continuity is intact.",
@@ -61,7 +61,7 @@ sessions. These directories may not exist yet; if `list_dir` reports
 `_internal/`, only the current inbox `{{memory_inbox}}/` and its contents are
 accessible.
 
-Treat memory as a strategy prior: current RGB-D, task_progress, and primitive
+Treat memory as a strategy prior: current RGB-D and primitive
 results take precedence. Coordinates never transfer between scenes.
 
 At every failed-attempt close-out, first write
@@ -73,7 +73,7 @@ push stalled”) rather than declaring a fixture unreachable.
 
 After success, produce concise proposed memory:
 - task-family: task technique, object/fixture recognition, ordering, robust parameter
-  ranges, task_progress milestones, and a failure table;
+  ranges, observed milestones, and a failure table;
 - global: only genuinely cross-task lessons, each with applicability and
   evidence. State “cause unknown” instead of inventing an explanation.
 
@@ -110,8 +110,8 @@ WORKFLOW = """
 4. Execute one coherent strategy. For trained contact behaviors, let RLDX
    finish its closed-loop sub-operation without manual interruptions. Use
    scripted primitives for deliberate free-space motions and verified geometry.
-5. After every action, inspect state and task_progress. Continue, recover in
-   place, or close out and reset with a changed plan.
+5. After every action, inspect the current images, robot state, and tool results.
+   Continue, recover in place, or close out and reset with a changed plan.
 6. On success, write the final audit to `{{output_dir}}/{{recipe_tag}}.json`,
    consolidate memory into the inbox, and call finish. The runner exports the
    clean winning recipe (commands after the final reset).

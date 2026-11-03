@@ -35,13 +35,19 @@ class CommonTools:
 
     @tool(readonly=True)
     def read_text_file(self, path: str, max_chars: int = 40000) -> ToolResult:
-        """Read a UTF-8 text file. Use for past recipe JSONLs, audit JSONs, and memory files. Large files are truncated. Published memory is read-only. During exploration, you may write only to your current memory inbox. Memory for other robots is unavailable.
+        """Read a UTF-8 text file from the configured memory directory. Only files allowed by the current memory policy are readable. Large files are truncated. Published memory is read-only. During exploration, you may write only to your current memory inbox. Memory for other robots is unavailable.
 
         Args:
             path: Absolute or repo-relative path
             max_chars: Max chars (default 40000)
         """
         resolved = self._memory.authorize_read(path)
+        if not resolved.is_relative_to(self._memory.root):
+            return ToolResult(
+                data={
+                    "error": "Only files in the configured memory directory are readable."
+                }
+            )
         if not resolved.exists():
             return ToolResult(data={"error": f"file not found: {resolved}"})
         if resolved.is_dir():

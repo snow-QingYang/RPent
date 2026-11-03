@@ -159,8 +159,13 @@ def test_toolkit_registers_common_specs_with_fresh_placeholder_substitution(
 def test_common_file_tools_dispatch_offline_without_capturing_robot_state(
     tmp_path: Path,
 ) -> None:
-    toolkit = _ContractToolkit(tmp_path / "state")
-    text_file = tmp_path / "files" / "note.txt"
+    memory = MemoryManager(
+        tmp_path / "memory",
+        memory_access="inbox_write",
+        inbox_cell_tag="current-cell",
+    )
+    toolkit = _ContractToolkit(tmp_path / "state", memory=memory)
+    text_file = memory.root / "_internal" / "inbox" / "current-cell" / "note.txt"
 
     written = toolkit.execute_tool(
         "write_text_file",
@@ -293,6 +298,39 @@ def test_common_file_tools_enforce_memory_manager_boundaries(
     assert published.read_text() == "published"
     assert evaluation.capture_calls == []
     assert exploration.capture_calls == []
+
+
+@pytest.mark.parametrize("path_kind", ["absolute", "parent", "symlink"])
+def test_common_file_read_rejects_paths_outside_memory(
+    tmp_path: Path,
+    path_kind: str,
+) -> None:
+    memory_root = tmp_path / "memory"
+    published = memory_root / "global" / "strategy.md"
+    published.parent.mkdir(parents=True)
+    published.write_text("allowed memory")
+    outside = tmp_path / "success_criteria.md"
+    outside.write_text("private simulator success criteria")
+    if path_kind == "absolute":
+        requested = outside
+    elif path_kind == "parent":
+        requested = memory_root / ".." / outside.name
+    else:
+        requested = published.parent / "criteria-link.md"
+        requested.symlink_to(outside)
+    toolkit = _ContractToolkit(
+        tmp_path / "state",
+        memory=MemoryManager(memory_root),
+    )
+
+    rejected = toolkit.execute_tool("read_text_file", {"path": str(requested)})
+    allowed = toolkit.execute_tool("read_text_file", {"path": str(published)})
+
+    assert rejected.data == {
+        "error": "Only files in the configured memory directory are readable."
+    }
+    assert allowed.data["content"] == "allowed memory"
+    assert toolkit.capture_calls == []
 
 
 def test_toolkit_reports_unknown_tools_and_invalid_arguments(tmp_path: Path) -> None:
@@ -572,8 +610,14 @@ def test_toolkit_cooperatively_cancels_and_cleans_up_active_operation(
 def test_common_file_read_waits_for_write_without_state_capture(tmp_path, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
-    toolkit = _ContractToolkit(tmp_path)
-    path = tmp_path / "audit.json"
+    memory = MemoryManager(
+        tmp_path / "memory",
+        memory_access="inbox_write",
+        inbox_cell_tag="current-cell",
+    )
+    toolkit = _ContractToolkit(tmp_path, memory=memory)
+    path = memory.root / "_internal" / "inbox" / "current-cell" / "audit.json"
+    path.parent.mkdir(parents=True)
     path.write_text("old")
     writing = threading.Event()
     reading = threading.Event()

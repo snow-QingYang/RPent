@@ -5,7 +5,7 @@
     "rpent/tools/common.py": [
       {
         "name": "read_text_file",
-        "description": "Read a UTF-8 text file. Use for past recipe JSONLs, audit JSONs, and memory files. Large files are truncated. Published memory is read-only. During exploration, you may write only to your current memory inbox. Memory for other robots is unavailable.",
+        "description": "Read a UTF-8 text file from the configured memory directory. Only files allowed by the current memory policy are readable. Large files are truncated. Published memory is read-only. During exploration, you may write only to your current memory inbox. Memory for other robots is unavailable.",
         "input_schema": {
           "type": "object",
           "properties": {
@@ -498,7 +498,7 @@
       },
       {
         "name": "view_env_state",
-        "description": "Read step NN from states.json + the matching state images in the output dir. If step is null, returns the latest entry. Each entry contains the env state, robocasa_terminated flag, task_progress, vla_desync status, and log. Embeds available PNGs as multimodal image content blocks. Use calibration-frame agentview images for pixel back-projection; use navview for base navigation and floor walkability; use wrist for close-range details near the gripper.",
+        "description": "Read the recorded observation for step NN, or the latest step if null. Returns robot state, task language, VLA history, the action log, and available images. Use calibration-frame agentview images for pixel back-projection; use navview for base navigation and floor walkability; use wrist for close-range details near the gripper.",
         "input_schema": {
           "type": "object",
           "properties": {
@@ -538,7 +538,7 @@
       },
       {
         "name": "finish",
-        "description": "Declare the task finished. Call when robocasa_terminated becomes True (success detected), or when genuinely stuck after honest exploration. Provide a 1-3 sentence summary of what worked and what failed.",
+        "description": "Report your assessment that the task is complete, failed, or stuck, and end the agent run. Base the assessment on task language and observations. Provide a 1-3 sentence summary with supporting evidence.",
         "input_schema": {
           "type": "object",
           "properties": {

@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -157,6 +158,79 @@ def test_solved_reads_only_the_final_environment_record() -> None:
 
     records.append(SimpleNamespace(extras={"success": False}))
     assert robot_toolkit.solved() is False
+
+
+def test_observations_hide_task_progress_but_preserve_internal_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fake_single_arm_primitives: type[Any],
+) -> None:
+    import robots.robocasa.primitives as primitives_module
+
+    fake_primitives = fake_single_arm_primitives.for_robot(
+        primitives_module.RoboCasaPrimitives
+    )
+    snapshots = [
+        {
+            "task_language": "Open the drawer.",
+            "state": {"robot0_base_pos": [0.0, 0.0, 0.0]},
+            "success": False,
+            "robocasa_terminated": False,
+            "task_progress": {"drawer_open": False, "dist": 0.5},
+        },
+        {
+            "task_language": "Open the drawer.",
+            "state": {"robot0_base_pos": [0.1, 0.0, 0.0]},
+            "success": True,
+            "robocasa_terminated": True,
+            "task_progress": {"drawer_open": True, "dist": 0.0},
+        },
+    ]
+    next_snapshot = iter(snapshots)
+    monkeypatch.setattr(
+        fake_primitives,
+        "current_state_dict",
+        lambda self: next(next_snapshot),
+        raising=False,
+    )
+    monkeypatch.setattr(fake_primitives, "_vla_desync", False, raising=False)
+    monkeypatch.setattr(fake_primitives, "_keep_heavy", 2, raising=False)
+    monkeypatch.setattr(primitives_module, "RoboCasaPrimitives", fake_primitives)
+    monkeypatch.setattr(
+        toolkit.robocasa_tools,
+        "_save_observation_artifacts",
+        lambda primitives, state, step_idx: None,
+    )
+    output_dir = tmp_path / "run"
+    robot_toolkit = toolkit.RoboCasaToolkit(
+        runtime_kwargs={"env_client": object(), "vla_client": object()},
+        dashboard_events=NullDashboardEventSink(),
+        memory=MemoryManager(tmp_path / "memory"),
+        state_output_dir=output_dir,
+    )
+
+    initial = robot_toolkit.execute_tool("view_env_state", {"step": 0})
+    assert robot_toolkit.solved() is False
+    action = robot_toolkit.execute_tool("move_base", {"forward": 0.1, "steps": 1})
+    history = robot_toolkit.execute_tool("view_env_state", {"step": 0})
+    assert history.data == initial.data
+    assert robot_toolkit.solved() is True
+
+    saved = json.loads((output_dir / "states.json").read_text())["steps"]
+    assert len(saved) == 2
+    for step, (response, expected) in enumerate(zip((initial, action), snapshots)):
+        assert not response.is_error
+        assert "task_progress" not in response.data
+        assert response.data["state"] == expected["state"]
+        assert response.data["success"] == expected["success"]
+        assert response.data["robocasa_terminated"] == expected["robocasa_terminated"]
+        assert response.data["task_language"] == expected["task_language"]
+        record = robot_toolkit.state.get(step)
+        assert record.extras["task_progress"] == expected["task_progress"]
+        assert record.state == expected["state"]
+        assert record.terminated == expected["robocasa_terminated"]
+        assert saved[step]["extras"]["task_progress"] == expected["task_progress"]
+        assert saved[step]["extras"]["success"] == expected["success"]
 
 
 @pytest.mark.parametrize("reading", ["none", "partial", "complete"])

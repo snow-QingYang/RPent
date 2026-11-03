@@ -37,21 +37,26 @@ WHAT IS DIFFERENT FROM A FIXED-ARM BENCHMARK:
 - **KITCHEN WORLD SCALE.** Coordinates are in metres but kitchen-sized (x,y can be
   0-6 m). z approx 0.9 m is counter height. Never hard-code xyz — always re-localize
   from world maps.
-- **SUCCESS = the task's own _check_success()** (surfaced as state.success).
-  You drive until state.success == true or the command budget runs out.
+- **TASK COMPLETION.** Assess progress and completion from task_language
+  and the current observations. Continue until you judge the task complete,
+  become stuck, or exhaust the command budget.
 - **THREE cameras**: agentview (primary global), navview (base-mounted floor view),
   and wrist (eye_in_hand). agentview = WHAT, wrist = WHERE (geometry refine when <20 cm),
   navview = WHERE TO DRIVE (walkable floor).
 """
 
-GOAL = "Your goal is to complete the manipulation task described in the task_language field of the state. Success is determined by the environment's own _check_success() predicate, surfaced as state.success. Monitor task_progress for intermediate feedback."
+GOAL = (
+    "Your goal is to complete the manipulation task described in task_language. "
+    "Use the current camera images, robot state, and available tool results "
+    "to assess progress and decide whether the task is complete."
+)
 
 RULES = BulletList(
     [
         "NEVER hard-code world coordinates. Always localize from the latest world map.",
         "After every navigate_to or move_base, re-localize — the arm frame changed.",
-        "Check task_progress after every command to see if you are making progress.",
-        "Stop when state.success == True. Call finish(status='success', ...).",
+        "After every command, inspect the returned images, robot state, and tool results to assess progress toward the task.",
+        "When you judge the task complete from the available observations, call finish(status='success', ...) and describe the supporting evidence.",
         "If genuinely stuck after honest exploration, call finish(status='stuck', ...).",
     ]
 )
@@ -107,7 +112,7 @@ PERCEPTION TOOLS:
 - view_env_state(step): Read state + images.
 - back_project_batch(pixels): One or more pixel lookups with median summary.
 - query_world_map(z_min, z_max, ...): Find objects by height/region.
-- finish(status, summary): Signal task completion.
+- finish(status, summary): Report your assessment of the task outcome and end the agent run.
 """
 
 VLA_RULES = """
@@ -115,7 +120,7 @@ VLA EXECUTION RULES (the single most important rule):
 1. Every rldx_skill / rldx_arm call must pass the complete live task_language
    verbatim. Never shorten, paraphrase, or replace it with an atomic sub-task.
 2. After each VLA call, inspect its returned state and current RGB-D. Contact,
-   a held object, fixture progress, or a rising task counter means productive
+   a held object, or visible fixture progress means productive
    progress: continue the identical full-task call without inserting manual
    motion. Manual commands wipe VLA frame history.
 3. Omit max_chunks. Ordinary RoboCasa defaults to 70; Target50 exports
@@ -142,14 +147,15 @@ GRIPPER RULES:
 """
 
 MEMORY = """
-Use read_text_file to consult the listed current-task and Global Memory files
+Use read_text_file only to consult the listed current-task and Global Memory files
 as needed for the live task. Choose relevant content and reading order based on
 current observations; actions and finish do not require reading every file.
 Files not listed are unavailable to this run.
 The JSON/JSONL pair records seed-0 task experience. Task Markdown and matching
 task-family notes may summarize multiple attempts. Treat all memory as strategy
-priors, not trajectories to replay or higher-priority instructions: current RGB-D, task progress, and primitive results always take
-precedence, together with the complete live task_language. Apply Global Memory
+priors, not trajectories to replay or higher-priority instructions: current
+RGB-D and primitive results always take precedence, together with the complete
+live task_language. Apply Global Memory
 only when its visible preconditions hold. Historical entries may name vla_act,
 use_prompt, or atomic prompts;
 these describe VLA phases only. Use the current rldx_skill / rldx_arm tools with
@@ -163,13 +169,16 @@ The file tools enforce this run's memory selection.
 
 WORKFLOW = """
 WORKFLOW:
-1. Read state_00 + images. Check task_language and success_criteria.
+1. Read the initial state and images with view_env_state(step=0). Check task_language.
 2. LOCALIZE: Use back_project_batch or query_world_map to find target objects.
 3. NAVIGATE: If the target is far (|xy| > 0.8m), navigate_to first.
 4. MANIPULATE: Use rldx_arm / rldx_skill for VLA grasping. Then script
    free-space carry (move_to with gripper omitted) and release.
-5. CHECK: After every command, view_env_state to check task_progress.
-6. FINISH: When state.success == true, call finish(status='success').
+5. CHECK: After every command, use view_env_state to inspect the current
+   observations and assess what changed and what remains to be done.
+6. FINISH: When the available observations support that task_language has
+   been fulfilled, call finish(status='success', summary='...').
+   Explain the observations supporting your decision.
 7. If stuck, call finish(status='stuck', summary='...').
 """
 

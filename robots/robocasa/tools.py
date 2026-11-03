@@ -158,7 +158,7 @@ def _save_observation_artifacts(
 
 @tool(readonly=True, exclude=("state",))
 def view_env_state(step: int | None = None, *, state: EnvState) -> ToolResult:
-    """Read step NN from states.json + the matching state images in the output dir. If step is null, returns the latest entry. Each entry contains the env state, robocasa_terminated flag, task_progress, vla_desync status, and log. Embeds available PNGs as multimodal image content blocks. Use calibration-frame agentview images for pixel back-projection; use navview for base navigation and floor walkability; use wrist for close-range details near the gripper.
+    """Read the recorded observation for step NN, or the latest step if null. Returns robot state, task language, VLA history, the action log, and available images. Use calibration-frame agentview images for pixel back-projection; use navview for base navigation and floor walkability; use wrist for close-range details near the gripper.
 
     Args:
         step: Step number; 0 = initial. Null = latest.
@@ -173,7 +173,6 @@ def view_env_state(step: int | None = None, *, state: EnvState) -> ToolResult:
     extras = record.extras
     out: dict = {
         "step": nn,
-        "task_progress": extras.get("task_progress", {}),
         "task_language": extras.get("task_language", ""),
         "state": record.state,
         "robocasa_terminated": record.terminated,
@@ -488,7 +487,7 @@ def query_world_map(
 
 @tool(readonly=True)
 def finish(status: Literal["success", "failure", "stuck"], summary: str) -> ToolResult:
-    """Declare the task finished. Call when robocasa_terminated becomes True (success detected), or when genuinely stuck after honest exploration. Provide a 1-3 sentence summary of what worked and what failed.
+    """Report your assessment that the task is complete, failed, or stuck, and end the agent run. Base the assessment on task language and observations. Provide a 1-3 sentence summary with supporting evidence.
 
     Args:
         status: Task outcome classification.
