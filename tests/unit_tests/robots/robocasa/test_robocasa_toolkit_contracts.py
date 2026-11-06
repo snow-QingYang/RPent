@@ -146,7 +146,7 @@ def test_toolkit_constructs_and_classifies_tools_with_a_fake(
     assert primitive.kwargs["allow_reset"] is (mode == "exploration")
     assert primitive.recording_started is True
     assert callable(primitive.kwargs["check_cancelled"])
-    assert (tmp_path / "success_criteria.md").read_text() == "offline success criteria"
+    assert not (tmp_path / "success_criteria.md").exists()
 
 
 def test_solved_reads_only_the_final_environment_record() -> None:

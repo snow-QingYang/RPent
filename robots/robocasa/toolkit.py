@@ -202,14 +202,6 @@ class RoboCasaToolkit(Toolkit):
         primitives.start_recording()
         self._action_frame_cursor = primitives.recorded_frame_count()
         record = robocasa_tools.dump_state(primitives, self._state, log=None)
-        try:
-            self._state.save(
-                "success_criteria.md",
-                primitives.dump_success_criteria(),
-                step=None,
-            )
-        except Exception as e:
-            logger.warning("failed to save success_criteria.md: %s", e)
         self._primitives = primitives
         self._publish_step(record)
 
