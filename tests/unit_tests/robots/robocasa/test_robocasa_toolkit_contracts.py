@@ -45,8 +45,6 @@ EXPECTED_TOOLS = COMMON_TOOLS | {
     "move_base",
     "reset",
     "view_env_state",
-    "back_project_batch",
-    "query_world_map",
 }
 
 
@@ -134,11 +132,11 @@ def test_toolkit_constructs_and_classifies_tools_with_a_fake(
     )
 
     assert _tool_names(robot_toolkit) == EXPECTED_TOOLS
-    assert _readonly_names(robot_toolkit) == COMMON_TOOLS | {
-        "view_env_state",
-        "back_project_batch",
-        "query_world_map",
-    }
+    assert _readonly_names(robot_toolkit) == COMMON_TOOLS | {"view_env_state"}
+    for name in ("back_project_batch", "query_world_map"):
+        assert robot_toolkit.execute_tool(name, {}).data == {
+            "error": f"unknown tool: {name}"
+        }
     assert dumped == fake_single_arm_primitives.instances
     primitive = fake_single_arm_primitives.instances[0]
     assert primitive.reset_calls == (1 if mode == "evaluation" else 0)

@@ -82,6 +82,12 @@ def test_prompt_requires_live_task_language_and_fresh_geometry(tmp_path: Path) -
     )
     assert "Historical entries may name vla_act" in rendered
     assert "Never replay stored xyz, xy, pixels, base poses" in rendered
+    assert "apply only steps supported by the current tool set" in rendered
+    assert "Monitor task_progress for intermediate feedback" in rendered
+    assert "back_project_batch" not in rendered
+    assert "query_world_map" not in rendered
+    assert "world map" not in rendered
+    assert "RGB-D" not in rendered
     assert "{{" not in rendered
 
 

@@ -81,6 +81,8 @@ class RoboCasaToolkit(Toolkit):
     def _register_robocasa_tools(self) -> None:
         self.add_tools(iter_tools(self._primitives))
         for definition in iter_tools(robocasa_tools):
+            if definition.name in {"back_project_batch", "query_world_map"}:
+                continue
             handler = (
                 definition
                 if definition.name == "finish"
