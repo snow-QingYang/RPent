@@ -47,6 +47,7 @@ class RoboCasaEnvClient(BaseEnvClient):
 
     def __init__(self, client: RpcClient, *, expected_meta: dict):
         super().__init__(client, expected_meta=expected_meta)
+        self.task_name = expected_meta["task_name"]
         self.camera_h = expected_meta["camera_h"]
         self.camera_w = expected_meta["camera_w"]
 
