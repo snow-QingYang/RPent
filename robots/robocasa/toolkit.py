@@ -187,6 +187,7 @@ class RoboCasaToolkit(Toolkit):
     ) -> None:
         """Wipe stale run artifacts, build the primitives, dump step 0."""
         self._state.reset()
+        self._final_success: bool | None = None
 
         from robots.robocasa.primitives import RoboCasaPrimitives
 
@@ -216,9 +217,12 @@ class RoboCasaToolkit(Toolkit):
             logger.warning("failed to save episode video: %s", e)
 
     def solved(self) -> bool:
-        """Return the success value from the final recorded environment state."""
-        record = self._state.latest_record()
-        return bool(record is not None and record.extras.get("success", False))
+        """Score the final environment after the evaluation planner has returned."""
+        if self._mode != "evaluation":
+            return bool(self._primitives.env.check_success())
+        if self._final_success is None:
+            self._final_success = bool(self._primitives.env.check_success())
+        return self._final_success
 
     def write_recipe(self, recipe_tag: str) -> str:
         """Write the RoboCasa recipe JSONL from the dumped state trace."""

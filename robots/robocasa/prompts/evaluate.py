@@ -38,8 +38,9 @@ WHAT IS DIFFERENT FROM A FIXED-ARM BENCHMARK:
   0-6 m). z approx 0.9 m is counter height. Never hard-code xyz — always re-localize
   from world maps.
 - **TASK COMPLETION.** Assess progress and completion from task_language
-  and the current observations. Continue until you judge the task complete,
-  become stuck, or exhaust the command budget.
+  and the current camera images and robot observations. You receive no native
+  task-success or task-progress signal. Judge the outcome yourself and call
+  finish with your assessment and supporting observations before ending the run.
 - **THREE cameras**: agentview (primary global), navview (base-mounted floor view),
   and wrist (eye_in_hand). agentview = WHAT, wrist = WHERE (geometry refine when <20 cm),
   navview = WHERE TO DRIVE (walkable floor).
@@ -58,6 +59,7 @@ RULES = BulletList(
         "After every command, inspect the returned images, robot state, and tool results to assess progress toward the task.",
         "When you judge the task complete from the available observations, call finish(status='success', ...) and describe the supporting evidence.",
         "If genuinely stuck after honest exploration, call finish(status='stuck', ...).",
+        "Before ending the run, call finish. If you cannot complete the task within the remaining command budget, call finish(status='failure', ...) and explain what remains incomplete. After finish, issue no further robot commands.",
     ]
 )
 
@@ -133,6 +135,8 @@ VLA EXECUTION RULES (the single most important rule):
    VLA attempt. Never repeat an unchanged no-contact attempt indefinitely.
 5. The vla_desync flag in view_env_state tells you if the VLA history was
    invalidated. If True, the next VLA call will start fresh.
+6. A VLA call does not stop when the simulator considers the task successful.
+   Inspect the returned observations to decide whether to continue or call finish.
 """
 
 GRIPPER_RULES = """
@@ -179,7 +183,9 @@ WORKFLOW:
 6. FINISH: When the available observations support that task_language has
    been fulfilled, call finish(status='success', summary='...').
    Explain the observations supporting your decision.
-7. If stuck, call finish(status='stuck', summary='...').
+7. If stuck, call finish(status='stuck', summary='...'). If the command budget
+   is running out with the task incomplete, call finish(status='failure', ...).
+   End after finish; do not issue further robot commands.
 """
 
 ENVIRONMENT = """

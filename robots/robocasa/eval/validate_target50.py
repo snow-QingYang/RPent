@@ -22,7 +22,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from robots.robocasa.eval.result import RESULT_SCHEMA_VERSION
+from robots.robocasa.eval.result import (
+    EXPERIMENT_VARIANT,
+    RESULT_SCHEMA_VERSION,
+    SUCCESS_SOURCE,
+)
 from robots.robocasa.memory import selection_errors
 
 DEFAULT_MANIFEST = Path(__file__).with_name("target50.json")
@@ -77,12 +81,13 @@ def validate_results(
 
                 expected = {
                     "schema_version": runtime_protocol["result_schema_version"],
+                    "experiment_variant": EXPERIMENT_VARIANT,
                     "protocol_id": manifest["protocol_id"],
                     "evaluation_split": split_name,
                     "task_name": task_name,
                     "environment_split": manifest["environment_split"],
                     "seed": seed,
-                    "success_source": manifest["success_source"],
+                    "success_source": SUCCESS_SOURCE,
                 }
                 errors_before_cell = len(errors)
                 for key, expected_value in expected.items():
@@ -98,11 +103,36 @@ def validate_results(
                 if result.get("valid") is not True:
                     errors.append(f"{relative}: result is not valid")
                 if result.get("termination_reason") not in {
-                    "completed",
+                    "agent_finish",
+                    "agent_return_without_finish",
                     "planner_timeout",
                     "planner_response_truncated",
                 }:
                     errors.append(f"{relative}: invalid termination_reason")
+                finish = result.get("agent_finish")
+                if not isinstance(finish, dict) or not isinstance(
+                    finish.get("called"), bool
+                ):
+                    errors.append(f"{relative}: invalid agent_finish record")
+                else:
+                    called = finish["called"]
+                    if called and (
+                        finish.get("status") not in ("success", "failure", "stuck")
+                        or not isinstance(finish.get("summary"), str)
+                    ):
+                        errors.append(f"{relative}: invalid agent_finish declaration")
+                    if not called and (
+                        finish.get("status") is not None
+                        or finish.get("summary") is not None
+                    ):
+                        errors.append(f"{relative}: declaration without agent finish")
+                    if result.get("termination_reason") in {
+                        "agent_finish",
+                        "agent_return_without_finish",
+                    } and called != (result["termination_reason"] == "agent_finish"):
+                        errors.append(
+                            f"{relative}: agent_finish contradicts termination_reason"
+                        )
 
                 planner = result.get("planner", {})
                 expected_planner = {
@@ -194,6 +224,7 @@ def validate_results(
 
     summary = {
         "protocol_id": manifest["protocol_id"],
+        "experiment_variant": EXPERIMENT_VARIANT,
         "valid_cells": valid_cells,
         "expected_cells": manifest["total_cells"],
         "splits": split_summaries,

@@ -226,12 +226,10 @@ class RLDXSkill:
         recording=False,
         record_frame=None,
     ):
-        """Drive RLDX-1 closed-loop until it FINISHES, not a fixed tiny budget. The VLA
-        has no terminate signal (like the eval, which runs to env-success), so we stop
-        on a completion criterion and report WHY — so a closed-empty gripper means the
-        VLA actually executed and missed, not that we cut it off mid-grasp.
-        Stops when: env `success` fires / the VLA SETTLES (eef+gripper stop changing for
-        `settle_patience` chunks = it's done) / `max_chunks` safety cap.
+        """Drive RLDX-1 until its chunk cap or motion-settling limit is reached.
+
+        The VLA has no terminate signal. Native task success does not stop this
+        call or appear in its result; the agent decides when to finish the task.
         base_clip=None -> full base motion; base_clip=v -> clamp base_motion to [-v,v]
         (whole-body policy: never zero it). Returns status + grasp signals so the LLM
         decides: continue (call again) vs done vs genuinely-failed."""
@@ -316,9 +314,9 @@ class RLDXSkill:
             if g_now:
                 grasp_ever = True
                 grasp_obj = grasp_obj or g_obj
-            if self.env.check_success():
-                status = "success"
-                break
+            # Preserve predicate bookkeeping at the original chunk cadence, but
+            # do not use its private verdict to stop execution or report success.
+            self.env.check_success()
             eef_now = np.asarray(self.env.eef_pos, np.float64)
             grip_now = float(self.env.gripper_qpos[0])
             eef_min_z = min(eef_min_z, float(eef_now[2]))

@@ -24,7 +24,7 @@ state automatically through :meth:`RoboCasaToolkit.get_env_state`.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import numpy as np
 from pydantic import Field
@@ -63,6 +63,20 @@ _CAMERA_WORLD_ARTIFACTS = {
 }
 
 
+def _without_task_feedback(value: Any) -> Any:
+    """Remove native task verdicts from action results, including old records."""
+    if isinstance(value, dict):
+        return {
+            key: _without_task_feedback(item)
+            for key, item in value.items()
+            if key not in {"success", "robocasa_terminated", "task_progress"}
+            and not (key == "status" and item == "success")
+        }
+    if isinstance(value, list):
+        return [_without_task_feedback(item) for item in value]
+    return value
+
+
 def dump_state(
     primitives: RoboCasaPrimitives,
     env_state: EnvState,
@@ -70,7 +84,7 @@ def dump_state(
 ) -> StepRecord:
     """Record one RoboCasa observation through its owned state record.
 
-    Appends a new :class:`StepRecord` (proprio + task + success + vla_desync)
+    Appends a new :class:`StepRecord` (proprio + task + vla_desync)
     via :meth:`EnvState.record_step`, saves the rendered RGB / depth / world
     artifacts for that step, and prunes heavy npy artifacts that fell out of
     the ``_keep_heavy`` window.
@@ -79,14 +93,13 @@ def dump_state(
     log = log or {}
     with env_state.record_step(
         state=state_dict["state"],
-        terminated=state_dict["robocasa_terminated"],
+        terminated=False,
         truncated=False,
         command=log.get("command"),
-        result=log.get("result"),
+        result=_without_task_feedback(log.get("result")),
         elapsed_s=log.get("elapsed_s"),
         extras={
             "task_language": state_dict["task_language"],
-            "success": state_dict["success"],
             "task_progress": state_dict["task_progress"],
             "vla_desync": primitives._vla_desync,
         },
@@ -175,12 +188,10 @@ def view_env_state(step: int | None = None, *, state: EnvState) -> ToolResult:
         "step": nn,
         "task_language": extras.get("task_language", ""),
         "state": record.state,
-        "robocasa_terminated": record.terminated,
         "vla_desync": extras.get("vla_desync", False),
-        "success": extras.get("success", False),
         "log": {
             "command": record.command,
-            "result": record.result,
+            "result": _without_task_feedback(record.result),
             "elapsed_s": record.elapsed_s,
         },
         "images": [],

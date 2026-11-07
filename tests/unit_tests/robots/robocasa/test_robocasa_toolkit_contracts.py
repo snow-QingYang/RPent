@@ -149,21 +149,63 @@ def test_toolkit_constructs_and_classifies_tools_with_a_fake(
     assert not (tmp_path / "success_criteria.md").exists()
 
 
-def test_solved_reads_only_the_final_environment_record() -> None:
-    records = [SimpleNamespace(extras={"success": True})]
+def test_state_preserves_private_predicate_updates_without_a_verdict() -> None:
+    import numpy as np
+
+    from robots.robocasa.primitives import RoboCasaPrimitives
+
+    calls = []
+    primitive = RoboCasaPrimitives.__new__(RoboCasaPrimitives)
+    primitive.env = SimpleNamespace(
+        current_raw_obs={
+            "language": "Open the drawer.",
+            "robot0_base_pos": [0.0, 0.0, 0.0],
+            "robot0_base_quat": [0.0, 0.0, 0.0, 1.0],
+        },
+        get_task_language=lambda: "Open the drawer.",
+        check_success=lambda: calls.append("check_success") or True,
+        get_task_progress=lambda: calls.append("task_progress") or {"dist": 0.0},
+        eef_pos=np.zeros(3),
+        eef_quat=np.array([0.0, 0.0, 0.0, 1.0]),
+        gripper_qpos=np.zeros(2),
+    )
+    state = primitive.current_state_dict()
+    assert calls == ["check_success", "task_progress", "check_success"]
+    assert "success" not in state
+    assert "robocasa_terminated" not in state
+    assert state["task_language"] == "Open the drawer."
+    assert state["task_progress"] == {"dist": 0.0}
+    assert state["state"]["robot0_eef_pos"] == [0.0, 0.0, 0.0]
+
+
+def test_solved_queries_and_caches_the_final_environment_verdict() -> None:
+    calls = []
     robot_toolkit = toolkit.RoboCasaToolkit.__new__(toolkit.RoboCasaToolkit)
-    robot_toolkit._state = SimpleNamespace(latest_record=lambda: records[-1])
-
+    robot_toolkit._mode = "evaluation"
+    robot_toolkit._final_success = None
+    robot_toolkit._primitives = SimpleNamespace(
+        env=SimpleNamespace(check_success=lambda: calls.append("score") or True)
+    )
+    assert calls == []
     assert robot_toolkit.solved() is True
+    assert robot_toolkit.solved() is True
+    assert calls == ["score"]
 
-    records.append(SimpleNamespace(extras={"success": False}))
-    assert robot_toolkit.solved() is False
 
-
-def test_observations_hide_task_progress_but_preserve_internal_state(
+@pytest.mark.parametrize(
+    ("action_name", "arguments"),
+    [
+        ("move_to", {"xyz": [0.0, 0.0, 1.0]}),
+        ("set_gripper", {"gripper": 1.0}),
+        ("rldx_skill", {"prompt": "Open the drawer."}),
+    ],
+)
+def test_actions_and_history_hide_task_verdicts_until_final_scoring(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     fake_single_arm_primitives: type[Any],
+    action_name: str,
+    arguments: dict,
 ) -> None:
     import robots.robocasa.primitives as primitives_module
 
@@ -208,29 +250,76 @@ def test_observations_hide_task_progress_but_preserve_internal_state(
         memory=MemoryManager(tmp_path / "memory"),
         state_output_dir=output_dir,
     )
+    scored = []
+    robot_toolkit._primitives.env = SimpleNamespace(
+        check_success=lambda: scored.append("score") or True
+    )
+    robot_toolkit.add_tool(
+        getattr(robot_toolkit._primitives, action_name).with_handler(
+            lambda **kwargs: ToolResult(
+                data={
+                    "ok": True,
+                    "status": "success",
+                    "success": True,
+                    "details": [{"robocasa_terminated": True, "task_progress": {}}],
+                }
+            )
+        ),
+        replace=True,
+    )
 
     initial = robot_toolkit.execute_tool("view_env_state", {"step": 0})
-    assert robot_toolkit.solved() is False
-    action = robot_toolkit.execute_tool("move_base", {"forward": 0.1, "steps": 1})
+    action = robot_toolkit.execute_tool(action_name, arguments)
     history = robot_toolkit.execute_tool("view_env_state", {"step": 0})
     assert history.data == initial.data
-    assert robot_toolkit.solved() is True
+    assert scored == []
+    finish = robot_toolkit.execute_tool(
+        "finish", {"status": "failure", "summary": "Drawer still looks closed."}
+    )
+    assert finish.data == {
+        "_finish": True,
+        "status": "failure",
+        "summary": "Drawer still looks closed.",
+    }
+    assert scored == []
+    assert action.data["log"]["result"] == {"ok": True, "details": [{}]}
 
     saved = json.loads((output_dir / "states.json").read_text())["steps"]
     assert len(saved) == 2
     for step, (response, expected) in enumerate(zip((initial, action), snapshots)):
         assert not response.is_error
-        assert "task_progress" not in response.data
+        assert (
+            not {"success", "task_progress", "robocasa_terminated"}
+            & response.data.keys()
+        )
         assert response.data["state"] == expected["state"]
-        assert response.data["success"] == expected["success"]
-        assert response.data["robocasa_terminated"] == expected["robocasa_terminated"]
         assert response.data["task_language"] == expected["task_language"]
         record = robot_toolkit.state.get(step)
         assert record.extras["task_progress"] == expected["task_progress"]
         assert record.state == expected["state"]
-        assert record.terminated == expected["robocasa_terminated"]
+        assert record.terminated is False
         assert saved[step]["extras"]["task_progress"] == expected["task_progress"]
-        assert saved[step]["extras"]["success"] == expected["success"]
+        assert "success" not in saved[step]["extras"]
+    assert robot_toolkit.solved() is True
+    assert scored == ["score"]
+
+
+def test_history_hides_native_verdicts_in_legacy_records(tmp_path):
+    from robots.robocasa.tools import view_env_state
+    from rpent.session import EnvState
+
+    state = EnvState(tmp_path)
+    with state.record_step(
+        state={"robot0_base_pos": [0.0, 0.0, 0.0]},
+        terminated=True,
+        truncated=False,
+        result={"status": "success", "success": True, "ok": True},
+        extras={"success": True, "task_progress": {"complete": True}},
+    ):
+        pass
+    result = view_env_state(step=0, state=state)
+    assert not {"success", "task_progress", "robocasa_terminated"} & result.data.keys()
+    assert result.data["log"]["result"] == {"ok": True}
 
 
 @pytest.mark.parametrize("reading", ["none", "partial", "complete"])
@@ -285,11 +374,13 @@ def test_exploration_attempt_budget_and_solved_guards():
     robot_toolkit = toolkit.RoboCasaToolkit.__new__(toolkit.RoboCasaToolkit)
     robot_toolkit._attempt = 1
     robot_toolkit._attempts_per_session = 2
+    robot_toolkit._mode = "exploration"
     records = [SimpleNamespace(extras={"success": False})]
     robot_toolkit._state = SimpleNamespace(latest_record=lambda: records[-1])
     resets = []
     robot_toolkit._primitives = SimpleNamespace(
-        reset=lambda: resets.append(1) or ToolResult()
+        reset=lambda: resets.append(1) or ToolResult(),
+        env=SimpleNamespace(check_success=lambda: records[-1].extras["success"]),
     )
 
     def inner(**kwargs):

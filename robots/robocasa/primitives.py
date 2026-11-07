@@ -525,20 +525,23 @@ class RoboCasaPrimitives:
 
     # ---- Phase 1: perception (state dict + rendered arrays) ----
     def current_state_dict(self) -> dict:
-        """Return the proprio + task + success state dict (NO object coords).
+        """Return robot state and task context without a task-success verdict.
 
         Rendered RGB/depth/world arrays are produced by the caller via
         ``_render_observation_artifacts`` (kept out of primitives so the primitives
         object stays free of any output-dir / file-IO concern).
         """
         o = self.env.current_raw_obs
+        task_language = o.get("language", self.env.get_task_language()) or ""
+        # Native predicates can update task bookkeeping. Preserve their original
+        # observation-time cadence without exposing their success verdicts.
+        self.env.check_success()
+        task_progress = self.task_progress()
+        self.env.check_success()
         return {
-            "task_language": o.get("language", self.env.get_task_language()) or "",
-            "success": self.env.check_success(),
-            # NUMERIC progress toward success (counters/sub-predicates the env's own
-            # _check_success computes) so the agent has a feedback loop, not just a bool.
-            "task_progress": self.task_progress(),
-            "robocasa_terminated": self.env.terminated,
+            "task_language": task_language,
+            # NoTaskGT retains progress internally; tools omit it from observations.
+            "task_progress": task_progress,
             "state": {
                 "robot0_eef_pos": self.env.eef_pos.tolist(),
                 "robot0_eef_quat": self.env.eef_quat.tolist(),

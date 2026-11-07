@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from rpent.evaluation import RunFinalizationContext, write_json_atomic
 
 RESULT_SCHEMA_VERSION = "1.1"
+EXPERIMENT_VARIANT = "agent_stop"
+SUCCESS_SOURCE = "env.check_success_after_planner"
 TARGET50_MANIFEST = Path(__file__).with_name("target50.json")
 
 
@@ -40,10 +43,10 @@ def _target50_identity(
     return None, None
 
 
-def _termination_reason(agent_error: str | None, success: bool) -> str:
+def _termination_reason(agent_error: str | None, finish_called: bool) -> str:
     """Classify completion without persisting provider error details."""
-    if success or not agent_error:
-        return "completed"
+    if not agent_error:
+        return "agent_finish" if finish_called else "agent_return_without_finish"
     lowered = agent_error.lower()
     if "timed out" in lowered and (
         "planner" in lowered or "agent sdk" in lowered or "codex sdk" in lowered
@@ -69,18 +72,21 @@ def build_cell_result(
     max_turns: int,
     cell_timeout_seconds: int | None,
     memory: dict[str, Any] | None = None,
+    finish_result: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one sanitized, environment-authoritative cell result."""
     protocol_id, evaluation_split = _target50_identity(
         task_name, environment_split, seed
     )
-    reason = _termination_reason(agent_error, success)
+    finish_called = finish_result is not None
+    reason = _termination_reason(agent_error, finish_called)
     memory = memory or {}
     max_chunks = int(os.environ.get("RLDX_MAX_CHUNKS", "70"))
     settle_patience = int(os.environ.get("RLDX_SETTLE_PATIENCE", "999"))
     action_steps = int(os.environ.get("RLDX_ACTION_STEPS_PER_CHUNK", "8"))
     return {
         "schema_version": RESULT_SCHEMA_VERSION,
+        "experiment_variant": EXPERIMENT_VARIANT,
         "protocol_id": protocol_id,
         "evaluation_split": evaluation_split,
         "task_name": task_name,
@@ -88,7 +94,12 @@ def build_cell_result(
         "seed": seed,
         "valid": environment_result_available and reason != "infrastructure_error",
         "success": bool(success),
-        "success_source": "state.success",
+        "success_source": SUCCESS_SOURCE,
+        "agent_finish": {
+            "called": finish_called,
+            "status": finish_result.get("status") if finish_called else None,
+            "summary": finish_result.get("summary") if finish_called else None,
+        },
         "termination_reason": reason,
         "elapsed_s": round(elapsed_s, 1),
         "planner": {
@@ -158,5 +169,6 @@ def finalize_cell_result(context: RunFinalizationContext) -> Path:
         max_turns=context.max_turns,
         cell_timeout_seconds=context.planner_timeout_s,
         memory=memory,
+        finish_result=context.finish_result,
     )
     return write_json_atomic(context.output_dir / "result.json", record)

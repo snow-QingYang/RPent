@@ -268,9 +268,10 @@ def test_cell_result_uses_environment_success_and_sanitizes_errors(monkeypatch):
     )
 
     assert result["protocol_id"] == "robocasa-harness-vla-v2"
+    assert result["experiment_variant"] == "agent_stop"
     assert result["evaluation_split"] == "atomic"
     assert result["success"] is False
-    assert result["success_source"] == "state.success"
+    assert result["success_source"] == "env.check_success_after_planner"
     assert result["valid"] is False
     assert result["termination_reason"] == "infrastructure_error"
     assert result["runtime"] == {
@@ -281,33 +282,77 @@ def test_cell_result_uses_environment_success_and_sanitizes_errors(monkeypatch):
     }
     assert "secret" not in json.dumps(result)
     assert "finish" not in result
+    assert result["agent_finish"] == {"called": False, "status": None, "summary": None}
 
 
 @pytest.mark.parametrize(
-    ("agent_error", "termination_reason"),
+    ("agent_error", "termination_reason", "valid"),
     [
-        ("Codex SDK timed out after 1800s", "planner_timeout"),
+        ("Codex SDK timed out after 1800s", "planner_timeout", True),
         (
             "planner response truncated (length): Model token limit (8192) "
             "exceeded before any response was generated",
             "planner_response_truncated",
+            True,
         ),
+        ("private provider connection failed", "infrastructure_error", False),
     ],
 )
+@pytest.mark.parametrize("native_success", [True, False])
+@pytest.mark.parametrize(
+    "finish_result", [None, {"_finish": True, "status": "success", "summary": "Done."}]
+)
 def test_cell_result_counts_planner_stops_but_not_missing_environment_result(
-    agent_error, termination_reason
+    agent_error, termination_reason, valid, native_success, finish_result
 ):
-    result = _cell_result(agent_error=agent_error)
+    result = _cell_result(
+        agent_error=agent_error, success=native_success, finish_result=finish_result
+    )
     missing = _cell_result(
         agent_error=agent_error,
         environment_result_available=False,
     )
 
     assert result["termination_reason"] == termination_reason
-    assert result["valid"] is True
-    assert result["success"] is False
+    assert result["valid"] is valid
+    assert result["success"] is native_success
+    assert result["agent_finish"]["called"] is (finish_result is not None)
     assert missing["valid"] is False
     assert missing["termination_reason"] == termination_reason
+
+
+@pytest.mark.parametrize(
+    ("native_success", "agent_status"), [(True, "failure"), (False, "success")]
+)
+def test_cell_result_keeps_agent_declaration_separate_from_native_score(
+    native_success, agent_status
+):
+    finish = {
+        "_finish": True,
+        "status": agent_status,
+        "summary": "The agent's assessment from its observations.",
+    }
+
+    result = _cell_result(success=native_success, finish_result=finish)
+
+    assert result["success"] is native_success
+    assert result["valid"] is True
+    assert result["termination_reason"] == "agent_finish"
+    assert result["agent_finish"] == {
+        "called": True,
+        "status": agent_status,
+        "summary": finish["summary"],
+    }
+
+
+@pytest.mark.parametrize("native_success", [True, False])
+def test_native_score_without_agent_finish_is_explicit(native_success):
+    result = _cell_result(success=native_success)
+
+    assert result["success"] is native_success
+    assert result["valid"] is True
+    assert result["termination_reason"] == "agent_return_without_finish"
+    assert result["agent_finish"] == {"called": False, "status": None, "summary": None}
 
 
 @pytest.mark.parametrize(
@@ -321,7 +366,7 @@ def test_cell_result_counts_planner_stops_but_not_missing_environment_result(
 def test_cell_result_preserves_environment_outcome_without_memory_evidence(memory):
     result = _cell_result(memory=memory)
     assert result["valid"] is True
-    assert result["termination_reason"] == "completed"
+    assert result["termination_reason"] == "agent_return_without_finish"
 
 
 def test_robocasa_registers_and_adapts_shared_result_finalizer(tmp_path, monkeypatch):
@@ -341,6 +386,11 @@ def test_robocasa_registers_and_adapts_shared_result_finalizer(tmp_path, monkeyp
         )
     )
 
+    finish = {
+        "_finish": True,
+        "status": "failure",
+        "summary": "Task appears incomplete.",
+    }
     path = finalize_cell_result(
         RunFinalizationContext(
             output_dir=tmp_path,
@@ -358,13 +408,15 @@ def test_robocasa_registers_and_adapts_shared_result_finalizer(tmp_path, monkeyp
             reasoning_effort="xhigh",
             max_turns=100,
             planner_timeout_s=1800,
-            finish_result={"status": "failure", "summary": "ignored claim"},
+            finish_result=finish,
             stats={"tool_calls": 3},
         )
     )
 
     assert path == tmp_path / "result.json"
-    assert json.loads(path.read_text(encoding="utf-8")) == _cell_result(success=True)
+    assert json.loads(path.read_text(encoding="utf-8")) == _cell_result(
+        success=True, finish_result=finish
+    )
 
 
 def test_robocasa_finalizer_marks_missing_environment_result_invalid(
@@ -503,7 +555,7 @@ def test_missing_or_corrupt_read_audit_is_separate_from_environment_outcome(
     result = _finalize_memory_run(output)
     assert result["valid"] is True
     assert result["success"] is True
-    assert result["termination_reason"] == "completed"
+    assert result["termination_reason"] == "agent_return_without_finish"
     expected_status = "missing" if corruption.startswith("missing_") else "invalid"
     assert result["memory"]["audit_status"] == expected_status
     assert "read_files" not in result["memory"]
@@ -586,6 +638,83 @@ def test_v2_validator_accepts_zero_and_partial_memory_reads(
     summary, errors = validate_results(tmp_path)
     assert summary["valid_cells"] == 1
     assert not any("OpenDrawer_s1/" in error for error in errors)
+
+
+@pytest.mark.parametrize("variant", [None, "baseline", "no_task_progress"])
+def test_agent_stop_validator_rejects_mixed_experiment_variants(
+    tmp_path, monkeypatch, variant
+):
+    monkeypatch.setenv("RLDX_MAX_CHUNKS", "40")
+    output = tmp_path / "atomic/OpenDrawer_s1"
+    output.mkdir(parents=True)
+    record = _cell_result()
+    if variant is None:
+        record.pop("experiment_variant")
+        record.pop("agent_finish")
+        record.update(success_source="state.success", termination_reason="completed")
+    else:
+        record["experiment_variant"] = variant
+    write_json_atomic(output / "result.json", record)
+
+    summary, errors = validate_results(tmp_path)
+
+    assert summary["experiment_variant"] == "agent_stop"
+    assert summary["valid_cells"] == 0
+    assert any(
+        "OpenDrawer_s1/" in error and "experiment_variant" in error for error in errors
+    )
+
+
+@pytest.mark.parametrize(
+    ("native_success", "agent_status"), [(True, "failure"), (False, "success")]
+)
+def test_agent_stop_validator_scores_native_outcome_despite_agent_disagreement(
+    tmp_path, monkeypatch, native_success, agent_status
+):
+    monkeypatch.setenv("RLDX_MAX_CHUNKS", "40")
+    output = tmp_path / "atomic/OpenDrawer_s1"
+    output.mkdir(parents=True)
+    record = _cell_result(
+        success=native_success,
+        finish_result={
+            "_finish": True,
+            "status": agent_status,
+            "summary": "Visual assessment.",
+        },
+    )
+    write_json_atomic(output / "result.json", record)
+
+    summary, errors = validate_results(tmp_path)
+
+    assert summary["valid_cells"] == 1
+    assert summary["splits"]["atomic"]["successes"] == int(native_success)
+    assert not any("OpenDrawer_s1/" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "finish",
+    [
+        None,
+        {"called": "true", "status": "success", "summary": "Done."},
+        {"called": False, "status": "success", "summary": "Done."},
+        {"called": True, "status": [], "summary": "Done."},
+        {"called": True, "status": "success", "summary": "Done."},
+    ],
+)
+def test_agent_stop_validator_rejects_missing_or_contradictory_finish_evidence(
+    tmp_path, monkeypatch, finish
+):
+    monkeypatch.setenv("RLDX_MAX_CHUNKS", "40")
+    output = tmp_path / "atomic/OpenDrawer_s1"
+    output.mkdir(parents=True)
+    record = _cell_result()
+    record["agent_finish"] = finish
+    write_json_atomic(output / "result.json", record)
+
+    summary, errors = validate_results(tmp_path)
+
+    assert summary["valid_cells"] == 0
+    assert any("OpenDrawer_s1/" in error and "finish" in error for error in errors)
 
 
 def test_v2_validator_has_no_memory_policy_override():
