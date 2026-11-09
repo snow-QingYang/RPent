@@ -1,8 +1,4 @@
-# RoboCasa composite: No task progress and agent success
-
-The experiment is **No task progress and agent success**: the Agent judges
-completion without live task-progress or simulator-success feedback; the
-evaluator retains independent final scoring.
+# RoboCasa365: Agent Check Success
 
 Branch `agent_check_success` builds on `no_task_progress` commit `26d8665`.
 The outer planner judges completion from task language and observations and
@@ -102,9 +98,6 @@ after `finish` in this run. This validates the execution and scoring separation,
 not benchmark success or a sandbox guarantee.
 
 ## 中文说明
-
-实验名称为 **No task progress and agent success**：去掉实时任务进度与模拟器成功
-反馈，由 Agent 自行判断结束；评测端仍独立给出原生最终评分。
 
 `agent_check_success` 分支基于 `no_task_progress` 的 `26d8665`。外层规划器根据
 任务文字和观测判断是否完成，并调用 `finish` 报告判断；RLDX 仍是动作策略，
