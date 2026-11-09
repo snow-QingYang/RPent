@@ -32,36 +32,48 @@ The tested depth path did not require xformers, open3d or gsplat.
       --local-dir ./checkpoints/DA3METRIC-LARGE
 
 RPENT_DEPTH_MODEL_PATH overrides the checkpoint directory. In ordinary CLI use,
-RPENT_DEPTH_DEVICE can override the inference device. The composite launcher
-clears that override so each worker uses its own selected CUDA device.
+RPENT_DEPTH_DEVICE can override the inference device. The CLI example below
+clears that override so `--cuda-device` selects the inference device.
 DA3 source revision is pinned in requirements/da3-runtime.txt.
 
 ## Evaluation
 
-First follow the [RoboCasa setup guide](docs/source-en/rst_source/simulators/robocasa.rst)
-for the simulator, RLDX dependencies, assets, checkpoint, planner credentials,
-and official task memory. Install this checkout into that environment. The
-launcher activates .venv if present; otherwise it uses the active environment.
-The checkpoint is expected at checkpoints/rldx-1-ft-rc365 and memory at
-memory/target50/robocasa/GPT_6_astra_high.
+Follow the [RoboCasa setup guide](docs/source-en/rst_source/simulators/robocasa.rst)
+and configure a [Codex planner connection](docs/source-en/rst_source/guides/configure_planner.rst).
+Activate your prepared environment and install this checkout with
+`pip install -e ".[robocasa]"`. Provide simulator assets, the checkpoint at
+`checkpoints/rldx-1-ft-rc365`, and the matching Astra memory at
+`memory/target50/robocasa/GPT_6_astra_high`. Download the required model files
+before enabling offline mode. Credentials, environments, weights, memory and
+run outputs are not included in this branch.
 
-The launcher uses GPT-6-Astra with xhigh reasoning, 100 turns, a 3600-second
-planner timeout, and the original RLDX settings (40 chunks, settle patience
-999, 8 actions per chunk). It evaluates 16 seen and 16 unseen tasks, each with
-seeds 1–5: 160 episodes. Eight GPUs receive 20 episodes each.
+Run one episode from the checkout with the recorded model and budgets:
 
-Set RPENT_EVAL_CODEX_DIR to a local Codex configuration directory when needed;
-it defaults to CODEX_HOME, or ~/.codex. Configure your own model provider and
-authentication there. Model downloads, memory, credentials, environments and
-experiment results are not included in this Git branch. The launcher uses
-cached Hugging Face files in offline mode, so download them during setup.
+```bash
+unset RLDX_RESET_SEED CUDA_VISIBLE_DEVICES MUJOCO_EGL_DEVICE_ID RPENT_DEPTH_DEVICE
+export RLDX_MAX_CHUNKS=40 RLDX_ACTION_STEPS_PER_CHUNK=8 RLDX_SETTLE_PATIENCE=999
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+export OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 
-    bash eval_composite_da3_astra.sh --dry-run
-    OUTPUT=/path/with/free/space/da3 bash eval_composite_da3_astra.sh
+rpent --robot robocasa \
+  --task-name ScrubCuttingBoard --split target --seed 1 \
+  --vla-model-path ./checkpoints/rldx-1-ft-rc365 --cuda-device 0 \
+  --planner codex --model gpt-6-astra --reasoning-effort xhigh \
+  --max-turns 100 --planner-timeout-s 3600 \
+  --memory-profile local \
+  --memory-dir ./memory/target50/robocasa/GPT_6_astra_high \
+  --output-dir ./runs/da3/composite_seen/ScrubCuttingBoard_s1
+```
 
-Use --gpus 0,1,2,3 to select four cards. The DA3 launcher skips any existing
-episode directory, including an incomplete one; choose a fresh OUTPUT for a
-clean rerun.
+Repeat for the `composite_seen` and `composite_unseen` entries in
+[target50.json](robots/robocasa/eval/target50.json): 16 tasks in each group,
+seeds 1–5, for 160 episodes. Both groups use CLI `--split target`; choose a
+separate output directory per task and seed. `--cuda-device` selects the GPU.
+Read the native outcome from each `result.json`. Keep valid task failures and
+budget-exhausted episodes; retry infrastructure failures without a valid result.
+
+Custom batch scheduling, live-join helpers and machine activation scripts are
+not distributed with this branch. The CLI example does not depend on them.
 
 ## Validation
 
@@ -76,6 +88,9 @@ started to publish this branch.
 ## 中文说明
 
 此分支把两个几何工具的数据源换成 DA3 预测深度，保留已知相机内参与位姿，
-以及机器人状态、任务进度、成功和抓取接触反馈。它与 no_task_progress 独立。
+以及机器人状态、任务进度、成功和抓取接触反馈。它与 `no_task_progress` 独立。
 先按官方文档配置 RoboCasa、RLDX、模型与记忆，再安装上面的增量 DA3 依赖。
-启动脚本默认八卡、160 局；已有 episode 目录会被跳过，包括未完成目录。
+在自行激活的环境中使用上方 CLI 命令，完整评测为 Seen/Unseen 各 16 个任务、
+每任务 seeds 1–5，共 160 局；每局使用独立输出目录。命令清除
+`RPENT_DEPTH_DEVICE` 覆盖值，使 `--cuda-device` 选择推理设备。
+自定义批量调度、运行中接入和机器激活脚本不发布。
