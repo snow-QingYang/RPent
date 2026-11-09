@@ -535,9 +535,6 @@ class RoboCasaPrimitives:
         return {
             "task_language": o.get("language", self.env.get_task_language()) or "",
             "success": self.env.check_success(),
-            # NUMERIC progress toward success (counters/sub-predicates the env's own
-            # _check_success computes) so the agent has a feedback loop, not just a bool.
-            "task_progress": self.task_progress(),
             "robocasa_terminated": self.env.terminated,
             "state": {
                 "robot0_eef_pos": self.env.eef_pos.tolist(),

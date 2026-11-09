@@ -146,6 +146,10 @@ def selection_errors(
         or not isinstance(families, dict)
     ):
         return ["invalid memory selection metadata"]
+    if memory.get("policy") == "none":
+        if selected or missing or families:
+            return ["no-memory evaluation requires empty memory selection metadata"]
+        return []
     published = task_files(task_name)
     native = local_task_files(task_name, split)
     wanted = published
@@ -182,7 +186,7 @@ def selection_errors(
 
 @dataclass(frozen=True)
 class TaskMemory:
-    """The files available to one task for the duration of a run."""
+    """The agent-visible selection and its validated source directory."""
 
     root: Path
     contents: dict[str, str]
@@ -200,7 +204,7 @@ class TaskMemory:
         profile: str = "hf",
         split: str = "target",
     ) -> TaskMemory:
-        """Select conventional task/global paths without a dataset manifest.
+        """Validate conventional task/global files, then expose an empty selection.
 
         With no task yet, validate only the session's root and global
         layer before starting shared services. Task runs must supply their name.
@@ -273,16 +277,15 @@ class TaskMemory:
             required = "global/*.md" if profile == "local" else GLOBAL_FILE
             raise ValueError(f"task-global requires {root / required}")
         contents.update({name: read(name) for name in global_files})
-        selected = tuple(contents)
         missing = tuple(name for name in wanted if name not in contents)
         for name in missing:
             logger.warning("memory layer not provided: %s", name)
-        return cls(root, contents, selected, missing, profile, families)
+        return cls(root, {}, (), (), profile, {})
 
     def metadata(self) -> dict[str, Any]:
-        """Record the selected layers without pinning a data version."""
+        """Record the disabled memory policy and the source profile."""
         return {
-            "policy": "task-global",
+            "policy": "none",
             "selected_files": list(self.selected),
             "missing_layers": list(self.missing),
             "profile": self.profile,
@@ -301,10 +304,10 @@ def memory_from_variables(variables: Mapping[str, object]) -> TaskMemory:
 
 
 class RoboCasaMemoryManager(MemoryManager):
-    """Restrict RPent file tools to the current task and global layer.
+    """Enforce the empty historical-memory selection for RPent file tools.
 
-    This is a file-tool boundary, not an OS sandbox. Non-memory observations
-    remain accessible through the shared tools' normal access rules.
+    This is a file-tool boundary, not an OS sandbox. Observations are available
+    through view_env_state; text files cannot expose hidden simulator feedback.
     """
 
     def __init__(self, memory: TaskMemory, *, output_dir: Path | None = None):
@@ -339,11 +342,18 @@ class RoboCasaMemoryManager(MemoryManager):
         return None
 
     file_tool_description = (
-        " RoboCasa memory is limited to the current task and global memory."
+        " In this RoboCasa evaluation, historical memory and read_text_file"
+        " are unavailable. Read observations with view_env_state."
+        " write_text_file can still save the current episode's audit."
     )
 
     def authorize_read(self, path: str | Path) -> Path:
         relative = self._relative_path(str(path))
+        if relative is None:
+            raise PermissionError(
+                "Text-file reads outside the memory selection are unavailable; "
+                "use view_env_state for current or historical observations."
+            )
         if relative is not None:
             if relative not in self.selection.selected:
                 raise PermissionError(

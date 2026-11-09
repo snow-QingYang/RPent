@@ -87,7 +87,6 @@ def dump_state(
         extras={
             "task_language": state_dict["task_language"],
             "success": state_dict["success"],
-            "task_progress": state_dict["task_progress"],
             "vla_desync": primitives._vla_desync,
         },
     ) as step_idx:
@@ -158,7 +157,7 @@ def _save_observation_artifacts(
 
 @tool(readonly=True, exclude=("state",))
 def view_env_state(step: int | None = None, *, state: EnvState) -> ToolResult:
-    """Read step NN from states.json + the matching state images in the output dir. If step is null, returns the latest entry. Each entry contains the env state, robocasa_terminated flag, task_progress, vla_desync status, and log. Embeds available PNGs as multimodal image content blocks. Use calibration-frame agentview images for pixel back-projection; use navview for base navigation and floor walkability; use wrist for close-range details near the gripper.
+    """Read step NN from states.json + the matching state images in the output dir. If step is null, returns the latest entry. Each entry contains robot proprioception, task language, success, robocasa_terminated, vla_desync, and the action log. Embeds available PNGs as multimodal image content blocks. Use current agentview images to identify objects and fixtures, navview to inspect navigation paths, and wrist images for close-range inspection.
 
     Args:
         step: Step number; 0 = initial. Null = latest.
@@ -173,7 +172,6 @@ def view_env_state(step: int | None = None, *, state: EnvState) -> ToolResult:
     extras = record.extras
     out: dict = {
         "step": nn,
-        "task_progress": extras.get("task_progress", {}),
         "task_language": extras.get("task_language", ""),
         "state": record.state,
         "robocasa_terminated": record.terminated,

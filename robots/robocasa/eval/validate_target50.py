@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Validate and summarize a complete RoboCasa Target50 result directory."""
+"""Validate and summarize RoboCasa Target50 results without historical memory."""
 
 from __future__ import annotations
 
@@ -146,7 +146,7 @@ def validate_results(
                 memory = result.get("memory", {})
                 if not isinstance(memory, dict):
                     memory = {}
-                if memory.get("policy") != "task-global":
+                if memory.get("policy") != "none":
                     errors.append(
                         f"{relative}: memory policy does not match the evaluation"
                     )
@@ -168,9 +168,10 @@ def validate_results(
                     or not all(isinstance(name, str) for name in reads)
                     or reads != sorted(set(reads))
                     or any(name not in selected for name in reads)
+                    or reads != []
                 ):
                     errors.append(
-                        f"{relative}: memory read_files must be a sorted subset of selected files"
+                        f"{relative}: no-memory evaluation requires empty memory read_files"
                     )
 
                 if (

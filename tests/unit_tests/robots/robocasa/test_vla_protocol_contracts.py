@@ -63,7 +63,7 @@ def _fake_primitives(task_language: str) -> tuple[RoboCasaPrimitives, _Recording
     return primitives, rldx
 
 
-def test_prompt_requires_live_task_language_and_fresh_geometry(tmp_path: Path) -> None:
+def test_prompt_requires_live_task_language_and_visual_progress(tmp_path: Path) -> None:
     rendered = format_prompt(
         system_prompt(),
         variables={
@@ -77,11 +77,11 @@ def test_prompt_requires_live_task_language_and_fresh_geometry(tmp_path: Path) -
     assert "complete live task_language" in rendered
     assert "Never shorten, paraphrase" in rendered
     assert "Only after two" in rendered
-    assert (
-        "consecutive calls with no contact and no visible semantic progress" in rendered
-    )
-    assert "Historical entries may name vla_act" in rendered
-    assert "Never replay stored xyz, xy, pixels, base poses" in rendered
+    assert "consecutive calls with no visible semantic progress" in rendered
+    assert "No historical task memory" in rendered
+    assert "Text-file reading is unavailable" in rendered
+    assert "gripper width alone does not establish a successful grasp" in rendered
+    assert "Historical entries may name vla_act" not in rendered
     assert "{{" not in rendered
 
 

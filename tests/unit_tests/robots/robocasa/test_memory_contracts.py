@@ -116,7 +116,7 @@ def test_parse_config_resolves_local_memory_dir(tmp_path):
     assert config.prompt_vars["memory_dir"] == str(memory_dir.resolve())
 
 
-def test_prompt_names_only_current_task_memory(tmp_path):
+def test_prompt_omits_historical_memory_files(tmp_path):
     memory_dir = tmp_path / "memory"
     rendered = format_prompt(
         system_prompt(),
@@ -125,14 +125,13 @@ def test_prompt_names_only_current_task_memory(tmp_path):
             "memory_dir": str(memory_dir),
         },
     )
-
-    assert str(memory_dir / "task-specific" / "OpenDrawer_s0.json") in rendered
-    assert str(memory_dir / "task-specific" / "OpenDrawer_s0_recipe.jsonl") in rendered
-    assert str(memory_dir / "task-specific" / "OpenDrawer.md") in rendered
-    assert "as needed for the live task" in rendered
-    assert "do not require reading every file" in rendered
-    assert "ArrangeTea_s0" not in rendered
-    assert str(memory_dir / "global" / "GLOBAL_MEMORY.md") in rendered
+    assert "No historical task memory" in rendered
+    assert "Do not search for or read" in rendered
+    assert "this episode's" in rendered
+    assert str(memory_dir) not in rendered
+    assert "Available memory files" not in rendered
+    assert "task-specific/" not in rendered
+    assert "GLOBAL_MEMORY.md" not in rendered
     assert "{{" not in rendered
 
 
@@ -159,14 +158,16 @@ def test_all_50_tasks_share_prompt_and_tool_selection(tmp_path, make_corpus):
                 "memory_dir": str(root),
             },
         )
-        for name in selection.selected:
-            assert str(root / name) in prompt
-        assert str(root / GLOBAL_FILE) in prompt
+        assert selection.contents == {}
+        assert selection.selected == selection.missing == ()
+        assert str(root) not in prompt
+        assert "No historical task memory" in prompt
         assert "{{" not in prompt
         manager = RoboCasaMemoryManager(selection)
         read = CommonTools(memory=manager).read_text_file
-        for name in selection.selected:
-            assert "content" in read(path=str(root / name)).data
+        for name in (GLOBAL_FILE, f"task-specific/{task}_s0.json"):
+            with pytest.raises(PermissionError):
+                read(path=str(root / name))
         assert not manager.unread_files
         other_task = "OpenDrawer" if task != "OpenDrawer" else "StirVegetables"
         with pytest.raises(PermissionError, match="current task/global selection"):
@@ -181,12 +182,12 @@ def test_optional_layers_and_stale_files_are_not_substituted(tmp_path, make_corp
     stale.parent.mkdir()
     stale.write_text("Old snapshot memory must not be read")
     selection = TaskMemory.load(root, "ArrangeTea")
-    assert selection.selected == ("global/GLOBAL_MEMORY.md",)
+    assert selection.selected == ()
     manager = RoboCasaMemoryManager(selection)
     file_tools = CommonTools(memory=manager)
     with pytest.raises(PermissionError):
         file_tools.read_text_file(path=str(stale))
-    assert file_tools.list_dir(path=str(root)).data["files"] == ["global"]
+    assert file_tools.list_dir(path=str(root)).data["files"] == []
     with pytest.raises(PermissionError):
         file_tools.list_dir(path=str(root / "task-specific"))
     empty = make_corpus(tmp_path / "empty", tasks=(), global_memory=False)
@@ -220,7 +221,7 @@ def test_corrupt_corpus_fails_before_prompt_or_robot_start(
         TaskMemory.load(root, "OpenDrawer")
 
 
-def test_reads_are_optional_and_files_are_rechecked(tmp_path, make_corpus):
+def test_memory_stays_unavailable_after_corpus_changes(tmp_path, make_corpus):
     from robots.robocasa.memory import RoboCasaMemoryManager, TaskMemory
     from robots.robocasa.toolkit import RoboCasaToolkit
     from rpent.dashboard.events import NullDashboardEventSink
@@ -231,30 +232,24 @@ def test_reads_are_optional_and_files_are_rechecked(tmp_path, make_corpus):
     toolkit = RoboCasaToolkit.__new__(RoboCasaToolkit)
     Toolkit.__init__(toolkit, dashboard_events=NullDashboardEventSink(), memory=manager)
     read = CommonTools(memory=manager).read_text_file
-    path = root / manager.selection.selected[0]
-    read(path=str(path), max_chars=1)
-    assert manager.unread_files
-    assert toolkit.execute_tool(
-        "finish", {"status": "stuck", "summary": "test"}
-    ).data.get("_finish", False)
-    for name in manager.selection.selected:
-        read(path=str(root / name))
+    path = root / "task-specific/OpenDrawer_s0.json"
+    with pytest.raises(PermissionError):
+        read(path=str(path), max_chars=1)
+    assert manager.unread_files == ()
     assert toolkit.execute_tool(
         "finish", {"status": "stuck", "summary": "test"}
     ).data.get("_finish", False)
     path.write_text("changed after initial validation")
-    with pytest.raises(ValueError, match="changed during this run"):
+    with pytest.raises(PermissionError):
         read(path=str(path))
-    # A subsequent run uses updated memory without editing a manifest or code.
     updated = RoboCasaMemoryManager(TaskMemory.load(root, "OpenDrawer"))
-    assert (
-        CommonTools(memory=updated).read_text_file(path=str(path)).data["content"]
-        == "changed after initial validation"
-    )
+    assert updated.selection.selected == ()
+    with pytest.raises(PermissionError):
+        CommonTools(memory=updated).read_text_file(path=str(path))
 
 
 @pytest.mark.parametrize("reading", ["none", "partial", "complete"])
-def test_on_demand_reads_do_not_block_actions_or_finish(
+def test_denied_memory_reads_do_not_block_actions_or_finish(
     tmp_path, monkeypatch, make_corpus, reading
 ):
     from robots.robocasa.memory import RoboCasaMemoryManager, TaskMemory
@@ -276,11 +271,12 @@ def test_on_demand_reads_do_not_block_actions_or_finish(
         toolkit, "get_env_state", lambda **kwargs: ToolResult(data=kwargs["result"])
     )
     read = CommonTools(memory=manager).read_text_file
-    if reading == "partial":
-        read(path=str(root / manager.selection.selected[0]), max_chars=1)
-    elif reading == "complete":
-        for name in manager.selection.selected:
-            read(path=str(root / name))
+    if reading != "none":
+        with pytest.raises(PermissionError):
+            read(
+                path=str(root / "task-specific/OpenDrawer_s0.json"),
+                max_chars=1 if reading == "partial" else 40000,
+            )
 
     for name, arguments in (
         ("move_to", {"xyz": [0.1, 0.2, 0.9]}),
@@ -371,17 +367,18 @@ def test_cli_selects_model_memory_before_startup(tmp_path, monkeypatch, source):
     }
 
 
-def test_updated_optional_markdown_is_discovered_without_manifest(
-    tmp_path, make_corpus
-):
+def test_new_optional_markdown_does_not_enable_memory(tmp_path, make_corpus):
     from robots.robocasa.memory import TaskMemory
 
     root = make_corpus(tmp_path / "robocasa", markdown=())
     path = root / "task-specific/OpenDrawer.md"
-    assert "task-specific/OpenDrawer.md" in TaskMemory.load(root, "OpenDrawer").missing
+    before = TaskMemory.load(root, "OpenDrawer")
+    assert before.selected == before.missing == ()
     path.write_text("New task note")
-    selection = TaskMemory.load(root, "OpenDrawer")
-    assert "task-specific/OpenDrawer.md" in selection.selected
+    after = TaskMemory.load(root, "OpenDrawer")
+    assert after.contents == {}
+    assert after.metadata() == before.metadata()
+    assert path.read_text() == "New task note"
     assert not (root / "CORPUS.json").exists()
 
 
@@ -535,8 +532,8 @@ def test_native_merge_output_shares_prompt_tool_and_audit_selection(
         "task-family/task-family_robocasa_target_tOpenDrawer.md",
         "global/global.md",
     }
-    assert set(selection.selected) == expected
-    assert selection.missing == ("task-specific/OpenDrawer.md",)
+    assert selection.selected == selection.missing == ()
+    assert selection.contents == selection.task_family == {}
     assert selection_errors(selection.metadata(), "OpenDrawer", "target") == []
     prompt = get_robot_spec().prompts.render(
         "system",
@@ -549,16 +546,16 @@ def test_native_merge_output_shares_prompt_tool_and_audit_selection(
         },
     )
     for name in expected:
-        assert str(root / name) in prompt
+        assert str(root / name) not in prompt
+    assert "No historical task memory" in prompt
     assert "StirVegetables" not in prompt
     assert "OpenDrawer_pretrain" not in prompt
     manager = RoboCasaMemoryManager(selection, output_dir=tmp_path / "run")
     file_tools = CommonTools(memory=manager)
     for name in expected:
-        assert (
-            file_tools.read_text_file(path=str(root / name)).data["content"]
-            == (root / name).read_text()
-        )
+        assert (root / name).is_file()
+        with pytest.raises(PermissionError):
+            file_tools.read_text_file(path=str(root / name))
     assert not manager.unread_files
     for path in (
         root / "MEMORY.md",
@@ -570,16 +567,12 @@ def test_native_merge_output_shares_prompt_tool_and_audit_selection(
     ):
         with pytest.raises(PermissionError):
             file_tools.read_text_file(path=str(path))
-    assert set(file_tools.list_dir(path=str(root)).data["files"]) == {
-        "global",
-        "task-family",
-        "task-specific",
-    }
+    assert file_tools.list_dir(path=str(root)).data["files"] == []
     audit = [
         json.loads(line)
         for line in (tmp_path / "run/memory_reads.jsonl").read_text().splitlines()
     ]
-    assert {entry["path"] for entry in audit} == expected
+    assert audit == []
 
 
 @pytest.mark.parametrize("native", [False, True])
@@ -607,10 +600,10 @@ def test_local_mixed_current_task_pairs_require_separate_directories(
     make_corpus(root)
     with pytest.raises(ValueError, match="separate --memory-dir"):
         TaskMemory.load(root, "OpenDrawer", profile="local")
-    # HF profile deliberately uses only the published task/global selection.
+    # HF still validates only the published layout, then exposes neither layout.
     selection = TaskMemory.load(root, "OpenDrawer", profile="hf")
-    assert "task-specific/OpenDrawer_s0.json" in selection.selected
-    assert "task-specific/OpenDrawer_target_s0.json" not in selection.selected
+    assert selection.selected == ()
+    assert selection.contents == {}
 
 
 def test_local_global_only_and_multiple_plain_global_leaves(tmp_path, make_corpus):
@@ -619,13 +612,11 @@ def test_local_global_only_and_multiple_plain_global_leaves(tmp_path, make_corpu
     root = make_corpus(tmp_path / "corpus", tasks=())
     (root / "global/second.md").write_text("Plain global Markdown is supported.")
     selection = TaskMemory.load(root, "OpenDrawer", profile="local")
-    assert set(selection.selected) == {"global/GLOBAL_MEMORY.md", "global/second.md"}
-    assert len(selection.missing) == 3
+    assert selection.selected == selection.missing == ()
+    assert selection.contents == {}
     assert selection_errors(selection.metadata(), "OpenDrawer", "target") == []
     (root / "global/GLOBAL_MEMORY.md").unlink()
-    assert TaskMemory.load(root, "OpenDrawer", profile="local").selected == (
-        "global/second.md",
-    )
+    assert TaskMemory.load(root, "OpenDrawer", profile="local").selected == ()
     with pytest.raises(ValueError, match="task-global requires"):
         TaskMemory.load(root, "OpenDrawer", profile="hf")
     (root / "global/second.md").unlink()

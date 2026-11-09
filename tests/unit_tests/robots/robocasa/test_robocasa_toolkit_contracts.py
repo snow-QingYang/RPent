@@ -45,8 +45,6 @@ EXPECTED_TOOLS = COMMON_TOOLS | {
     "move_base",
     "reset",
     "view_env_state",
-    "back_project_batch",
-    "query_world_map",
 }
 
 
@@ -136,8 +134,6 @@ def test_toolkit_constructs_and_classifies_tools_with_a_fake(
     assert _tool_names(robot_toolkit) == EXPECTED_TOOLS
     assert _readonly_names(robot_toolkit) == COMMON_TOOLS | {
         "view_env_state",
-        "back_project_batch",
-        "query_world_map",
     }
     assert dumped == fake_single_arm_primitives.instances
     primitive = fake_single_arm_primitives.instances[0]
@@ -145,7 +141,7 @@ def test_toolkit_constructs_and_classifies_tools_with_a_fake(
     assert primitive.kwargs["allow_reset"] is (mode == "exploration")
     assert primitive.recording_started is True
     assert callable(primitive.kwargs["check_cancelled"])
-    assert (tmp_path / "success_criteria.md").read_text() == "offline success criteria"
+    assert not (tmp_path / "success_criteria.md").exists()
 
 
 def test_solved_reads_only_the_final_environment_record() -> None:
@@ -161,7 +157,7 @@ def test_solved_reads_only_the_final_environment_record() -> None:
 
 @pytest.mark.parametrize("reading", ["none", "partial", "complete"])
 @pytest.mark.parametrize("allow_reset", [False, True])
-def test_optional_reading_preserves_no_reset(
+def test_denied_memory_reads_preserve_reset_policy(
     tmp_path, monkeypatch, make_corpus, reading, allow_reset
 ):
     from robots.robocasa.memory import RoboCasaMemoryManager, TaskMemory
@@ -193,11 +189,12 @@ def test_optional_reading_preserves_no_reset(
     )
 
     read = CommonTools(memory=memory).read_text_file
-    if reading == "partial":
-        read(path=str(root / memory.selection.selected[0]), max_chars=1)
-    elif reading == "complete":
-        for name in memory.selection.selected:
-            read(path=str(root / name))
+    if reading != "none":
+        with pytest.raises(PermissionError):
+            read(
+                path=str(root / "task-specific/OpenDrawer_s0.json"),
+                max_chars=1 if reading == "partial" else 40000,
+            )
     result = robot_toolkit.execute_tool("reset", {}).data
     if allow_reset:
         assert result["reset"] is True

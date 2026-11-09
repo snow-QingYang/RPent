@@ -220,19 +220,13 @@ def test_spawned_environment_uses_cli_seed_and_clears_legacy_override(
 
 
 def _memory_metadata(task_name="OpenDrawer") -> dict:
-    selection = [
-        f"task-specific/{task_name}_s0.json",
-        f"task-specific/{task_name}_s0_recipe.jsonl",
-        f"task-specific/{task_name}.md",
-        "global/GLOBAL_MEMORY.md",
-    ]
     return {
-        "policy": "task-global",
+        "policy": "none",
         "profile": "hf",
         "task_family": {},
         "audit_status": "ok",
-        "selected_files": selection,
-        "read_files": sorted(selection),
+        "selected_files": [],
+        "read_files": [],
         "missing_layers": [],
     }
 
@@ -421,7 +415,7 @@ def _finalize_memory_run(output_dir: Path) -> dict:
     return json.loads(path.read_text())
 
 
-def test_reused_output_directory_credits_only_current_run_reads(tmp_path, make_corpus):
+def test_reused_output_directory_clears_stale_historical_reads(tmp_path, make_corpus):
     from robots.robocasa.memory import RoboCasaMemoryManager, TaskMemory
 
     root = make_corpus(tmp_path / "robocasa")
@@ -432,29 +426,28 @@ def test_reused_output_directory_credits_only_current_run_reads(tmp_path, make_c
             TaskMemory.load(root, "OpenDrawer"), output_dir=output
         )
 
-    def read_all(manager):
-        read = CommonTools(memory=manager).read_text_file
-        for name in manager.selection.selected:
-            read(path=str(root / name))
-
     first = start()
-    read_all(first)
-    assert _finalize_memory_run(output)["valid"] is True
+    assert first.selection.selected == ()
+    assert _finalize_memory_run(output)["memory"]["audit_status"] == "ok"
+    audit = output / "memory_reads.jsonl"
+    audit.write_text('{"path":"task-specific/OpenDrawer.md","complete":true}\n')
+    stale = _finalize_memory_run(output)
+    assert stale["success"] is True
+    assert stale["memory"]["audit_status"] == "invalid"
     second = start()
-    unread = _finalize_memory_run(output)
-    assert unread["valid"] is True
-    assert unread["memory"]["audit_status"] == "ok"
-    assert unread["memory"]["read_files"] == []
-    assert second.unread_files == second.selection.selected
-    read = CommonTools(memory=second).read_text_file
-    read(path=str(root / second.selection.selected[0]), max_chars=1)
-    assert _finalize_memory_run(output)["valid"] is True
-    assert _finalize_memory_run(output)["memory"]["read_files"] == []
-    read_all(second)
     result = _finalize_memory_run(output)
     assert result["valid"] is True
-    assert result["memory"]["policy"] == "task-global"
-    assert result["memory"]["read_files"] == sorted(second.selection.selected)
+    assert result["memory"]["audit_status"] == "ok"
+    assert result["memory"]["policy"] == "none"
+    assert result["memory"]["selected_files"] == []
+    assert result["memory"]["read_files"] == []
+    assert second.unread_files == second.selection.selected == ()
+    with pytest.raises(PermissionError):
+        CommonTools(memory=second).read_text_file(
+            path=str(root / "task-specific/OpenDrawer_s0.json"), max_chars=1
+        )
+    assert audit.read_text() == ""
+    assert _finalize_memory_run(output)["memory"] == result["memory"]
 
 
 @pytest.mark.parametrize(
@@ -546,12 +539,12 @@ def _write_valid_cell_result(
     ("field", "value", "message"),
     [
         ("policy", "task-specific", "memory policy"),
-        ("read_files", ["task-specific/ArrangeTea.md"], "sorted subset"),
-        ("read_files", None, "sorted subset"),
-        ("read_files", [{}], "sorted subset"),
+        ("read_files", ["task-specific/ArrangeTea.md"], "empty memory read_files"),
+        ("read_files", None, "empty memory read_files"),
+        ("read_files", [{}], "empty memory read_files"),
         ("audit_status", "invalid", "read audit"),
         ("audit_status", "missing", "read audit"),
-        ("selected_files", ["task-specific/ArrangeTea.md"], "selected memory files"),
+        ("selected_files", ["task-specific/ArrangeTea.md"], "empty memory selection"),
     ],
 )
 def test_v2_validator_rejects_mixed_or_invalid_memory(
@@ -573,9 +566,11 @@ def test_v2_validator_rejects_mixed_or_invalid_memory(
     assert any("CloseFridge_s1" in error and message in error for error in errors)
 
 
-@pytest.mark.parametrize("reads", [[], ["global/GLOBAL_MEMORY.md"]])
-def test_v2_validator_accepts_zero_and_partial_memory_reads(
-    tmp_path, monkeypatch, reads
+@pytest.mark.parametrize(
+    ("reads", "valid_cells"), [([], 1), (["global/GLOBAL_MEMORY.md"], 0)]
+)
+def test_v2_validator_accepts_only_empty_memory_reads(
+    tmp_path, monkeypatch, reads, valid_cells
 ):
     monkeypatch.setenv("RLDX_MAX_CHUNKS", "40")
     output = tmp_path / "atomic/OpenDrawer_s1"
@@ -584,8 +579,12 @@ def test_v2_validator_accepts_zero_and_partial_memory_reads(
     memory["read_files"] = reads
     write_json_atomic(output / "result.json", _cell_result(memory=memory))
     summary, errors = validate_results(tmp_path)
-    assert summary["valid_cells"] == 1
-    assert not any("OpenDrawer_s1/" in error for error in errors)
+    assert summary["valid_cells"] == valid_cells
+    cell_errors = [error for error in errors if "OpenDrawer_s1/" in error]
+    if valid_cells:
+        assert cell_errors == []
+    else:
+        assert any("empty memory read_files" in error for error in cell_errors)
 
 
 def test_v2_validator_has_no_memory_policy_override():
@@ -704,12 +703,16 @@ def test_v2_local_selection_round_trip_with_no_reads(
     assert result["success"] is True
     assert result["memory"]["read_files"] == []
     assert result["memory"]["profile"] == "local"
+    assert result["memory"]["policy"] == "none"
+    assert result["memory"]["task_family"] == {}
+    assert result["memory"]["selected_files"] == []
     summary, errors = validate_results(tmp_path / "results")
     assert summary["valid_cells"] == 1
     assert not any("OpenDrawer_s1/" in error for error in errors)
     if native:
-        family = next(iter(result["memory"]["task_family"]))
-        result["memory"]["task_family"][family]["regime"] = "pretrain"
+        result["memory"]["task_family"] = {
+            "task-family/unexpected.md": {"regime": "pretrain"}
+        }
     else:
         result["memory"]["profile"] = []
     write_json_atomic(output / "result.json", result)

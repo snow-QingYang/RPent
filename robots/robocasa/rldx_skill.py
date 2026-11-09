@@ -204,15 +204,6 @@ class RLDXSkill:
         )
         return self.env.reassemble_env_action(ad)
 
-    def _grasp_contact(self):
-        """Direction-AGNOSTIC grasp check: True iff BOTH gripper fingerpads are in
-        contact with the SAME task object (robosuite `_check_grasp`, the same primitive
-        the benchmark uses). Unlike `peak_lift` (which only sees Z-axis lift and MISSES
-        sideways/horizontal grasps — a bar, a handle, a lateral pull — and anything
-        grasped-but-not-yet-raised), this fires for ANY grasp orientation and even for
-        holding a static object. Returns (grasping: bool, obj_name: str|None)."""
-        return self.env.grasp_contact()
-
     # ---- the skill ----
     def run(
         self,
@@ -233,8 +224,8 @@ class RLDXSkill:
         Stops when: env `success` fires / the VLA SETTLES (eef+gripper stop changing for
         `settle_patience` chunks = it's done) / `max_chunks` safety cap.
         base_clip=None -> full base motion; base_clip=v -> clamp base_motion to [-v,v]
-        (whole-body policy: never zero it). Returns status + grasp signals so the LLM
-        decides: continue (call again) vs done vs genuinely-failed."""
+        (whole-body policy: never zero it). Returns execution status and robot
+        proprioception; object contact and contact-derived grasp labels are omitted."""
         self._load()
         # Start a fresh video buffer for this run() call (no-op if RLDX_VIDEO_DIR unset).
         self._frames = [] if self._video_dir is not None else None
@@ -266,8 +257,6 @@ class RLDXSkill:
         applied = 0
         settled = 0
         status = "cap"
-        grasp_ever = False
-        grasp_obj = None
         last_cmd_close = False
         for c in range(max_chunks):
             obs = self._build_obs(prompt)
@@ -311,11 +300,6 @@ class RLDXSkill:
                     prompt
                 )  # PER-SIM-STEP history (matches eval cadence)
                 self._capture_video_frame()  # OPTIONAL video (no-op if RLDX_VIDEO_DIR unset)
-            # ROBUST grasp check once per chunk (direction-agnostic; see _grasp_contact)
-            g_now, g_obj = self._grasp_contact()
-            if g_now:
-                grasp_ever = True
-                grasp_obj = grasp_obj or g_obj
             if self.env.check_success():
                 status = "success"
                 break
@@ -337,20 +321,9 @@ class RLDXSkill:
             grip_prev = grip_now
         grip = float(self.env.gripper_qpos[0])
         base1 = np.asarray(self.env.current_raw_obs["robot0_base_pos"], np.float64)[:2]
-        # ---- ROBUST, DIRECTION-AGNOSTIC GRASP DETERMINATION ----
-        # Primary (gold): fingerpad↔object CONTACT now (works for any grasp orientation,
-        # incl. sideways; does NOT depend on Z-lift). Secondary: the commanded-close-but-
-        # held-apart signal — the gripper was told to CLOSE but the fingers stopped before
-        # fully-closed-empty (~0), i.e. something is wedged between them. This catches
-        # holding a FIXTURE handle (drawer/door) that isn't in env.objects. We expose all
-        # signals so the caller never has to trust a single brittle proxy (e.g. peak_lift).
-        grasp_now, gobj_now = self._grasp_contact()
-        grasp_obj = gobj_now or grasp_obj
-        held_apart = bool(
-            last_cmd_close and 0.004 < grip < 0.039
-        )  # closed onto something
-        grasped_now = bool(grasp_now or held_apart)  # holding at END of call
-        grasp_detected = bool(grasp_ever or grasped_now)  # held at SOME point
+        # Command + finger-width heuristic only; this does not identify an object
+        # or establish that a grasp succeeded.
+        held_apart = bool(last_cmd_close and 0.004 < grip < 0.039)
         video_path = self._flush_video()  # write cmd_NN.mp4 (no-op if disabled)
         self._video_idx += 1
         result = {
@@ -359,13 +332,7 @@ class RLDXSkill:
             "status": status,
             "chunks": c + 1,
             "steps_applied": applied,
-            "grasped": grasped_now,  # holding at end-of-call (carry-ready)
-            "grasp_detected": grasp_detected,  # grabbed at some chunk (may have placed since)
-            "grasp_contact": bool(
-                grasp_now
-            ),  # fingerpad↔object contact (gold standard)
-            "held_apart": held_apart,  # commanded-close + fingers wedged apart
-            "grasp_obj": grasp_obj,  # which task object, if contact-identified
+            "held_apart": held_apart,
             "gripper_qpos": round(grip, 3),
             "peak_lift": round(peak_lift, 3),
             "base_clip": base_clip,
