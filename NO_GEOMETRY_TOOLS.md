@@ -25,39 +25,41 @@ It is independent of the DA3, NoTaskGT, and NoContactGT variants.
 ## Evaluation
 
 Follow the [RoboCasa setup guide](docs/source-en/rst_source/simulators/robocasa.rst)
-and install this checkout into the configured environment. The included
-`activate_env.sh` preserves this server's checkout and EGL setup paths; update
-those paths for another machine. Provide simulator assets, the RLDX checkpoint
-at `checkpoints/rldx-1-ft-rc365`, and memory at
-`memory/target50/robocasa/GPT_6_astra_high`. The launcher reads a private Codex
-profile from `.local-setup/codex-nogeomtools/{config.toml,auth.json}`. Set up your
-own provider and credentials there. These files, environments, model weights
-and run outputs are excluded from Git.
+and configure a [Codex planner connection](docs/source-en/rst_source/guides/configure_planner.rst).
+Activate your prepared environment and install this checkout with
+`pip install -e ".[robocasa]"`. Provide simulator assets, the checkpoint at
+`checkpoints/rldx-1-ft-rc365`, and the matching Astra memory at
+`memory/target50/robocasa/GPT_6_astra_high`. Download the required model files
+before enabling offline mode. Credentials, environments, weights, memory and
+run outputs are not included in this branch.
 
-`eval_composite_astra.sh` runs the official 32 composite tasks, seeds 1–5:
-80 Seen and 80 Unseen episodes. It uses GPT-6-Astra with `xhigh`, 100 planner
-turns, a 3600-second planner timeout, and RLDX 40 chunks × 8 action steps,
-with settle patience 999. Each GPU runs one episode at a time.
+Run one episode from the checkout with the recorded model and budgets:
 
 ```bash
-OUTPUT=/path/on/result-volume/composite_nogeomtools_astra \
-  bash eval_composite_astra.sh --gpus 0,1,2,3,4,5,6,7
+unset RLDX_RESET_SEED CUDA_VISIBLE_DEVICES MUJOCO_EGL_DEVICE_ID RPENT_DEPTH_DEVICE
+export RLDX_MAX_CHUNKS=40 RLDX_ACTION_STEPS_PER_CHUNK=8 RLDX_SETTLE_PATIENCE=999
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+export OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+
+rpent --robot robocasa \
+  --task-name ScrubCuttingBoard --split target --seed 1 \
+  --vla-model-path ./checkpoints/rldx-1-ft-rc365 --cuda-device 0 \
+  --planner codex --model gpt-6-astra --reasoning-effort xhigh \
+  --max-turns 100 --planner-timeout-s 3600 \
+  --memory-profile local \
+  --memory-dir ./memory/target50/robocasa/GPT_6_astra_high \
+  --output-dir ./runs/no_geometry_tools/composite_seen/ScrubCuttingBoard_s1
 ```
 
-The launcher preserves valid successes and valid task failures. It archives
-invalid attempts before rerunning them, and stops dispatching new episodes
-after an infrastructure failure. In-flight episodes can finish.
+Repeat for the `composite_seen` and `composite_unseen` entries in
+[target50.json](robots/robocasa/eval/target50.json): 16 tasks in each group,
+seeds 1–5, for 160 episodes. Both groups use CLI `--split target`; choose a
+separate output directory per task and seed. `--cuda-device` selects the GPU.
+Read the native outcome from each `result.json`. Keep valid task failures and
+budget-exhausted episodes; retry infrastructure failures without a valid result.
 
-Workers share a pending-episode queue, so a GPU claims the next task after its
-current episode finishes. `--gpus 0,1,2,3` selects four GPUs; the default is
-0–7. `--dry-run` prints the pending commands without executing them and displays
-an approximate round-robin assignment. Private worker authentication copies live
-under `OUTPUT/.workers`; publish only reviewed result exports.
-
-The launcher records dispatch state under `OUTPUT/.runner-sessions`. An
-infrastructure failure creates a session `STOP` file and halts new dispatch.
-The earlier server-specific job that waited for NoContactGT completion is not
-part of this launcher and is not needed for an independent run.
+Custom batch scheduling, live-join helpers and machine activation scripts are
+not distributed with this branch. The CLI example does not depend on them.
 
 ## Completed evaluation
 
@@ -74,8 +76,6 @@ for the full task/seed comparison, source hashes and audit scope.
 
 The RoboCasa and tool-schema unit tests verify the runtime tool list, rejected
 calls to removed tools, prompt consistency, and unchanged declared functions.
-Launcher and queue checks exercise resume behavior, predecessor completion,
-GPU selection, cancellation, and failure handling without running an experiment.
 The completed smoke checked real VLA execution and recorded planner calls before
 the full batch; its file-access audit is a trace check, not a sandbox.
 
@@ -83,5 +83,7 @@ the full batch; its file-access audit is a trace check, not a sandbox.
 
 此分支移除两个主动三维查询工具及评测提示中的调用要求，保留内部深度、
 任务进度、接触和成功反馈。它与 DA3、NoTaskGT、NoContactGT 分支独立。
-默认八卡共享待办队列，可指定四卡；支持按整局续跑，保留有效成功和有效失败。
-换机器需要调整激活脚本的本地路径，并自行配置权重、记忆、环境和认证。
+按上方官方 CLI 示例，在自行配置并激活的环境中运行。完整评测为 Seen/Unseen
+各 16 个任务、每任务 seeds 1–5，共 160 局；每局使用独立输出目录。
+保留有效成功和有效失败结果；仅重试无有效结果的基础设施故障。
+自定义批量调度、运行中接入和机器激活脚本不发布。
