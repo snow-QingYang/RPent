@@ -4,7 +4,7 @@ The experiment is **No task progress and agent success**: the Agent judges
 completion without live task-progress or simulator-success feedback; the
 evaluator retains independent final scoring.
 
-Branch `agent_check_success` builds on `no_task_progress` commit `26d8665`.
+Branch `no_task_progress_and_agent_success` builds on `no_task_progress` commit `26d8665`.
 The outer planner judges completion from task language and observations and
 reports its decision through `finish`. RLDX remains an action policy; it has no
 learned termination output.
@@ -36,8 +36,8 @@ learned termination output.
 The serialized identifier remains `experiment_variant="agent_stop"` for
 compatibility with the evaluation already in progress. The branch validator
 requires this identifier, the score source and consistent finish evidence;
-it rejects baseline records. `agent_check_success` is the experiment and branch
-name, not a new result-schema value.
+it rejects baseline records. `no_task_progress_and_agent_success` is the published branch for
+No task progress and agent success, not a new result-schema value.
 
 This branch is **evaluation only**. Exploration guards and recipe export have
 not been adapted. The existing `finish` handler and shared planner flow are
@@ -106,7 +106,7 @@ not benchmark success or a sandbox guarantee.
 实验名称为 **No task progress and agent success**：去掉实时任务进度与模拟器成功
 反馈，由 Agent 自行判断结束；评测端仍独立给出原生最终评分。
 
-`agent_check_success` 分支基于 `no_task_progress` 的 `26d8665`。外层规划器根据
+`no_task_progress_and_agent_success` 分支基于 `no_task_progress` 的 `26d8665`。外层规划器根据
 任务文字和观测判断是否完成，并调用 `finish` 报告判断；RLDX 仍是动作策略，
 没有学习得到的终止输出。
 
@@ -129,7 +129,7 @@ not benchmark success or a sandbox guarantee.
 
 为兼容正在进行的评测，结果仍使用 `experiment_variant="agent_stop"`。
 本分支验证器要求该标签、评分来源及一致的结束声明，不能混入 baseline 记录；
-`agent_check_success` 是实验和分支名称，并非新的结果字段值。
+`no_task_progress_and_agent_success` 是对应实验的分支名称，并非新的结果字段值。
 
 本分支仅支持 **evaluation**，未适配 exploration 的成功保护和策略导出。
 `finish` 处理函数与共享规划器流程未改动；prompt 要求结束后不再发出机器人命令，
