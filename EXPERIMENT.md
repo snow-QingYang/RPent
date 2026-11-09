@@ -1,4 +1,4 @@
-# RoboCasa composite: No task progress
+# RoboCasa evaluation without task_progress observations
 
 Branch: **no_task_progress**. Upstream experiment base:
 0e406bb96d670d0c18a4cea9a6ea047119661d19. This branch is independent of da3.
