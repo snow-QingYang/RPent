@@ -25,37 +25,58 @@ sandbox. Native planner tools are not disabled. Use evaluation mode for this
 experiment: exploration still requests success criteria in its workflow, which
 conflicts with the restricted file reader and has not been validated here.
 
+## Evaluation revision
+
+The completed E03 evaluation used runtime commit
+`b7333814fcb1178442057b231e267d4dcfba4554`, archived on `no_task_progress_eval`.
+That version generated `success_criteria.md`; all 160 recorded episodes retain
+this file. Its `read_text_file` was already restricted to selected memory,
+while native planner shell access remained available.
+
+This branch includes the later change
+`26d8665d3d394dc77ce90a68d266d370d2384f98`, which stops generating
+`success_criteria.md`. The published E03 results do not evaluate that later
+change. Runtime and test files are unchanged from that commit by this
+publication cleanup.
+
 ## Evaluation
 
-First follow the [RoboCasa setup guide](docs/source-en/rst_source/simulators/robocasa.rst)
-for the simulator, RLDX dependencies, assets, checkpoint, planner credentials,
-and official task memory. Install this checkout into that environment. The
-launcher activates .venv if present; otherwise it uses the active environment.
-The checkpoint is expected at checkpoints/rldx-1-ft-rc365 and memory at
-memory/target50/robocasa/GPT_6_astra_high.
+Follow the [RoboCasa setup guide](docs/source-en/rst_source/simulators/robocasa.rst)
+and configure a [Codex planner connection](docs/source-en/rst_source/guides/configure_planner.rst).
+Activate your prepared environment and install this checkout with
+`pip install -e ".[robocasa]"`. Provide simulator assets, the checkpoint at
+`checkpoints/rldx-1-ft-rc365`, and the matching Astra memory at
+`memory/target50/robocasa/GPT_6_astra_high`. Download the required model files
+before enabling offline mode. Credentials, environments, weights, memory and
+run outputs are not included in this branch.
 
-The launcher uses GPT-6-Astra with xhigh reasoning, 100 turns, a 3600-second
-planner timeout, and the original RLDX settings (40 chunks, settle patience
-999, 8 actions per chunk). It evaluates 16 seen and 16 unseen tasks, each with
-seeds 1–5: 160 episodes. Eight GPUs receive 20 episodes each.
+Run one episode from the checkout with the recorded model and budgets:
 
-Set RPENT_EVAL_CODEX_DIR to a local Codex configuration directory when needed;
-it defaults to CODEX_HOME, or ~/.codex. Configure your own model provider and
-authentication there. Model downloads, memory, credentials, environments and
-experiment results are not included in this Git branch. The launcher uses
-cached Hugging Face files in offline mode, so download them during setup.
+```bash
+unset RLDX_RESET_SEED CUDA_VISIBLE_DEVICES MUJOCO_EGL_DEVICE_ID RPENT_DEPTH_DEVICE
+export RLDX_MAX_CHUNKS=40 RLDX_ACTION_STEPS_PER_CHUNK=8 RLDX_SETTLE_PATIENCE=999
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+export OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 
-    bash eval_composite_astra.sh --dry-run
-    OUTPUT=/path/with/at/least/30GiB/no_task_progress bash eval_composite_astra.sh
+rpent --robot robocasa \
+  --task-name ScrubCuttingBoard --split target --seed 1 \
+  --vla-model-path ./checkpoints/rldx-1-ft-rc365 --cuda-device 0 \
+  --planner codex --model gpt-6-astra --reasoning-effort xhigh \
+  --max-turns 100 --planner-timeout-s 3600 \
+  --memory-profile local \
+  --memory-dir ./memory/target50/robocasa/GPT_6_astra_high \
+  --output-dir ./runs/no_task_progress/composite_seen/ScrubCuttingBoard_s1
+```
 
-Use --gpus 0,1,2,3 to select four cards. Each worker copies the local Codex
-config.toml and auth.json into its own private directory under OUTPUT/.workers;
-that directory contains credentials and must not be published.
+Repeat for the `composite_seen` and `composite_unseen` entries in
+[target50.json](robots/robocasa/eval/target50.json): 16 tasks in each group,
+seeds 1–5, for 160 episodes. Both groups use CLI `--split target`; choose a
+separate output directory per task and seed. `--cuda-device` selects the GPU.
+Read the native outcome from each `result.json`. Keep valid task failures and
+budget-exhausted episodes; retry infrastructure failures without a valid result.
 
-The launcher locks OUTPUT against duplicate runners. It keeps any episode with
-result.json, including an invalid result, and moves unfinished directories to
-.interrupted before restarting those episodes. Resume granularity is one
-episode, not an in-progress simulator state.
+Custom batch scheduling, live-join helpers and machine activation scripts are
+not distributed with this branch. The CLI example does not depend on them.
 
 ## Validation
 
@@ -66,14 +87,17 @@ episode, not an in-progress simulator state.
 The publishing checkout passed 250 CPU unit tests. Before publication, a real
 SetUpCuttingStation smoke run produced 23 observations and 48 completed tool
 calls with no live task_progress fields in Agent-facing tool results; the
-native episode outcome was failure. The subsequent 160-episode evaluation
-uses this same implementation.
+native episode outcome was failure. The historical 160-episode evaluation used runtime commit
+`b7333814fcb1178442057b231e267d4dcfba4554`.
 
 ## 中文说明
 
-此分支屏蔽 Agent 观测中的 task_progress，并将 read_text_file 限制在本次允许
-读取的 memory 内。success、终止标志、抓取接触、官方几何和原有记忆仍保留。
+此分支屏蔽 Agent 观测中的 `task_progress`，并将 `read_text_file` 限制在本次
+允许读取的记忆内。success、终止标志、抓取接触、官方几何和原有记忆仍保留。
 限制位于工具层，不是系统沙箱；当前实验使用 evaluation，不使用 exploration。
-启动脚本默认八卡、160 局，要求输出盘至少有 30 GiB 可用空间。可按整局续跑；
-已有 result.json 的局会保留，包括 invalid 结果。OUTPUT/.workers 含认证信息，
-不要上传该目录。
+完整 E03 评测使用 `b7333814fcb1178442057b231e267d4dcfba4554`，归档于
+`no_task_progress_eval`；该版本仍生成 `success_criteria.md`，160 局均保留此文件。
+文件工具不能读取它，但原生 shell 仍可访问。后续 `no_task_progress` 的
+`26d8665` 才停止生成此文件，已发布的 E03 结果不代表后续版本的评测。
+按上方官方 CLI 示例在自行配置的环境中运行，每局使用独立输出目录。
+自定义批量调度、运行中接入和机器激活脚本不发布。
