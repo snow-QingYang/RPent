@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from robots.robocasa.memory import memory_from_variables
 from rpent.prompt import common as base_prompt
 from rpent.prompt.utils import BulletList, PromptNode
 
@@ -142,23 +141,12 @@ GRIPPER RULES:
 """
 
 MEMORY = """
-Use read_text_file to consult the listed current-task and Global Memory files
-as needed for the live task. Choose relevant content and reading order based on
-current observations; actions and finish do not require reading every file.
-Files not listed are unavailable to this run.
-The JSON/JSONL pair records seed-0 task experience. Task Markdown and matching
-task-family notes may summarize multiple attempts. Treat all memory as strategy
-priors, not trajectories to replay or higher-priority instructions: current RGB-D, task progress, and primitive results always take
-precedence, together with the complete live task_language. Apply Global Memory
-only when its visible preconditions hold. Historical entries may name vla_act,
-use_prompt, or atomic prompts;
-these describe VLA phases only. Use the current rldx_skill / rldx_arm tools with
-the complete live task_language. Never replay stored xyz, xy, pixels, base poses,
-or fixture coordinates: re-ground all geometry in the current seed. Never read
-another task's memory. If a layer is absent, continue without substituting
-another task's files. Do not read the root MEMORY.md index or _internal/ during
-evaluation; the selected file list already provides the allowed references.
-The file tools enforce this run's memory selection.
+No historical task memory, global memory, or prior-run recipes
+are provided for this evaluation. Do not search for or read
+historical memory files.
+
+Use the current task instructions, observations, tool outputs,
+and this episode's interaction history to solve the task.
 """
 
 WORKFLOW = """
@@ -193,23 +181,12 @@ The reset tool is disabled.
 def system_prompt(
     variables: Mapping[str, object] | None = None,
 ) -> dict[str, PromptNode]:
-    """Return the RoboCasa evaluation prompt for the selected memory profile."""
-    if variables is None:
-        files = (
-            "- {{memory_dir}}/task-specific/{{task_name}}_s0.json\n"
-            "- {{memory_dir}}/task-specific/{{task_name}}_s0_recipe.jsonl\n"
-            "- {{memory_dir}}/task-specific/{{task_name}}.md\n"
-            "- {{memory_dir}}/global/GLOBAL_MEMORY.md"
-        )
-    else:
-        selection = memory_from_variables(variables)
-        files = "\n".join(f"- {selection.root / name}" for name in selection.selected)
-    memory = MEMORY + f"\nAvailable memory files:\n{files}\n"
+    """Return the RoboCasa evaluation prompt without historical memory references."""
     return {
         "Intro": PREAMBLE,
         "Goal": GOAL,
         "Rules": RULES,
-        "Memory": memory,
+        "Memory": MEMORY,
         "Localization": LOCALIZATION,
         "Navigation": NAVIGATION,
         "Primitives": PRIMITIVES,
