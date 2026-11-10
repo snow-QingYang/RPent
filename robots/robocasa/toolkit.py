@@ -72,14 +72,26 @@ class RoboCasaToolkit(Toolkit):
         )
         self._register_robocasa_tools()
         if enable_direct_action:
+            definition = direct_action_tool(
+                self._primitives.env.action_specs, self._primitives.execute_action
+            )
             self.add_tool(
-                direct_action_tool(
-                    self._primitives.env.action_specs, self._primitives.execute_action
-                )
+                definition.with_handler(partial(self._planner_action, definition))
             )
 
+    def _planner_action(self, action: Any, **kwargs: Any) -> ToolResult:
+        """Keep native control results internal, including on state-capture failure."""
+        result = action(**kwargs)
+        return ToolResult(
+            data=robocasa_tools._without_robot_feedback(result.data),
+            images=result.images,
+        )
+
     def _register_robocasa_tools(self) -> None:
-        self.add_tools(iter_tools(self._primitives))
+        for definition in iter_tools(self._primitives):
+            self.add_tool(
+                definition.with_handler(partial(self._planner_action, definition))
+            )
         for definition in iter_tools(robocasa_tools):
             if definition.name in {"back_project_batch", "query_world_map"}:
                 continue
@@ -94,7 +106,10 @@ class RoboCasaToolkit(Toolkit):
 
         if self._mode == "exploration":
             self.add_tool(
-                self._primitives.reset.with_handler(self._reset_episode), replace=True
+                self._primitives.reset.with_handler(
+                    partial(self._planner_action, self._reset_episode)
+                ),
+                replace=True,
             )
             self.add_tool(
                 robocasa_tools.finish.with_handler(
@@ -177,9 +192,8 @@ class RoboCasaToolkit(Toolkit):
                     e,
                 )
         out = robocasa_tools.view_env_state(record.step_idx, state=self._state)
-        out.data["agent_elapsed_s"] = elapsed_s
         if result.get("interrupted"):
-            out.data.update(result)
+            out.data.update(robocasa_tools._without_robot_feedback(result))
         return out
 
     def init_primitives(

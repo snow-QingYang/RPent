@@ -80,7 +80,14 @@ def test_prompt_requires_live_task_language_and_visual_progress(tmp_path: Path) 
     assert "consecutive calls with no visible semantic progress" in rendered
     assert "No historical task memory" in rendered
     assert "Text-file reading is unavailable" in rendered
-    assert "gripper width alone does not establish a successful grasp" in rendered
+    assert "After each VLA call, inspect its current RGB images" in rendered
+    assert (
+        "Robot-state measurements and action-execution summaries are not provided"
+        in rendered
+    )
+    assert "Your previous command arguments remain in the history" in rendered
+    for unavailable in ("gripper_qpos", "held_apart", "vla_desync", "status='cap'"):
+        assert unavailable not in rendered
     assert "Historical entries may name vla_act" not in rendered
     assert "{{" not in rendered
 

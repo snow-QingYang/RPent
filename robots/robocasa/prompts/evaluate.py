@@ -30,9 +30,9 @@ PandaOmron** (you can DRIVE the base AND move the arm).
 WHAT IS DIFFERENT FROM A FIXED-ARM BENCHMARK:
 - **MOBILE BASE.** Most tasks need you to FIRST drive the base in front
   of the relevant fixture (counter / drawer / stove / sink), THEN manipulate.
-  The arm only reaches ~0.8 m; if a target's world-xy is far from the base, you
-  CANNOT reach it — navigate_to first. After driving, the arm frame changes, so
-  RE-LOCALIZE and the primitives auto-recalibrates the arm servo.
+  The arm only reaches ~0.8 m; if the target appears beyond reach in the images,
+  reposition the base first. After driving, the arm frame changes, so
+  RE-LOCALIZE from the images; the primitives recalibrate the arm servo internally.
 - **KITCHEN WORLD SCALE.** Coordinates are in metres but kitchen-sized (x,y can be
   0-6 m). z approx 0.9 m is counter height. Never hard-code xyz — always re-localize
   from current observations.
@@ -43,13 +43,13 @@ WHAT IS DIFFERENT FROM A FIXED-ARM BENCHMARK:
   navview = WHERE TO DRIVE (walkable floor).
 """
 
-GOAL = "Your goal is to complete the manipulation task described in the task_language field of the state. Success is determined by the environment's own _check_success() predicate, surfaced as state.success. Use current images and robot observations to assess intermediate progress."
+GOAL = "Your goal is to complete the manipulation task described in the task_language field of the state. Success is determined by the environment's own _check_success() predicate, surfaced as state.success. Use current RGB images to assess intermediate progress."
 
 RULES = BulletList(
     [
         "NEVER hard-code world coordinates. Always use the current observations.",
         "After every navigate_to or move_base, re-localize — the arm frame changed.",
-        "After every command, inspect the returned images and robot state to assess progress.",
+        "After every command, inspect the returned RGB images to assess intermediate progress and check state.success for task completion.",
         "Stop when state.success == True. Call finish(status='success', ...).",
         "If genuinely stuck after honest exploration, call finish(status='stuck', ...).",
     ]
@@ -58,6 +58,11 @@ RULES = BulletList(
 LOCALIZATION = """
 Use the current camera observations to identify task objects and fixtures.
 Only the tools listed in this run are available.
+Robot-state measurements and action-execution summaries are not provided.
+Assess spatial changes and object handling from RGB; use state.success to
+determine task completion. Your previous command arguments remain in the history.
+Use move_delta and move_base for small relative adjustments when needed;
+coordinate-based actions still accept targets you choose from visual context.
 
 CAMERA IMAGE ROLES:
 - calibration_frame agentview: Use this image to identify objects and fixtures.
@@ -66,8 +71,9 @@ CAMERA IMAGE ROLES:
 """
 
 NAVIGATION = """
-Use navigate_to for long-range base movement. The base drives toward the target
-(x,y) and stops facing it. Use tol = desired approach distance + object half-depth:
+Use navigate_to for long-range base movement when you can choose a world (x,y)
+target from visual context. The base drives toward the target and stops facing it.
+Use tol = desired approach distance + object half-depth:
 navigate_to with tol=0.6m stops about 0.6m in front of the target, facing it.
 
 Use move_base for fine adjustments (small turns, short forward/backward nudges).
@@ -91,7 +97,7 @@ AVAILABLE PRIMITIVES:
 - reset(): Restart episode (only in EXPLORE mode).
 
 PERCEPTION TOOLS:
-- view_env_state(step): Read state + images.
+- view_env_state(step): Read images, task language, native success, and command history.
 - finish(status, summary): Signal task completion.
 """
 
@@ -99,21 +105,19 @@ VLA_RULES = """
 VLA EXECUTION RULES (the single most important rule):
 1. Every rldx_skill / rldx_arm call must pass the complete live task_language
    verbatim. Never shorten, paraphrase, or replace it with an atomic sub-task.
-2. After each VLA call, inspect its returned robot state and current RGB images.
+2. After each VLA call, inspect its current RGB images.
    Visible progress toward the task means you should continue the identical
    full-task call without inserting manual motion. Assess object handling from
-   the images; gripper width alone does not establish a successful grasp.
+   the images.
    Manual commands wipe VLA frame history.
 3. Omit max_chunks. Ordinary RoboCasa defaults to 70; Target50 exports
    RLDX_MAX_CHUNKS=40 to lock its protocol. Do NOT pass settle_patience
    (default 999 disables settle detection).
-4. A 'cap' alone is not failure. After an initial call with no visible
-   semantic progress, continue the same full-task call once. Only after two
+4. After an initial call with no visible semantic progress,
+   continue the same full-task call once. Only after two
    consecutive calls with no visible semantic progress should
    you re-localize and make a bounded free-space re-stage before an independent
    VLA attempt. Never repeat an unchanged unproductive attempt indefinitely.
-5. The vla_desync flag in view_env_state tells you if the VLA history was
-   invalidated. If True, the next VLA call will start fresh.
 """
 
 GRIPPER_RULES = """
@@ -143,10 +147,11 @@ WORKFLOW = """
 WORKFLOW:
 1. Read the initial state and images with view_env_state(step=0). Check task_language.
 2. LOCALIZE: Inspect the current camera images to identify target objects and fixtures.
-3. NAVIGATE: If the target is far (|xy| > 0.8m), navigate_to first.
+3. NAVIGATE: If the target appears beyond arm reach, reposition the base using
+   navview and the available movement tools.
 4. MANIPULATE: Use rldx_arm / rldx_skill for VLA grasping. Then script
    free-space carry (move_to with gripper omitted) and release.
-5. CHECK: After every command, inspect the returned observations and success signal.
+5. CHECK: After every command, inspect the returned RGB images and native success signal.
 6. FINISH: When state.success == true, call finish(status='success').
 7. If stuck, call finish(status='stuck', summary='...').
 """
@@ -171,7 +176,7 @@ The reset tool is disabled.
 def system_prompt(
     variables: Mapping[str, object] | None = None,
 ) -> dict[str, PromptNode]:
-    """Return the combined-ablation prompt with native success feedback."""
+    """Return the combined-ablation prompt using RGB and native success feedback."""
     return {
         "Intro": PREAMBLE,
         "Goal": GOAL,

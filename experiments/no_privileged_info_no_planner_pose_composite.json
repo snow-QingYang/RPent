@@ -1,0 +1,272 @@
+{
+  "schema_version": "1.0",
+  "protocol_id": "robocasa-harness-vla-v2",
+  "benchmark": "RoboCasa365",
+  "environment_split": "target",
+  "success_source": "state.success",
+  "total_tasks": 32,
+  "total_cells": 160,
+  "dependencies": {
+    "robocasa": {
+      "repository": "https://github.com/RLinf/robocasa",
+      "branch": "rpent"
+    },
+    "rldx": {
+      "repository": "https://github.com/RLinf/RLDX-1",
+      "branch": "rpent"
+    },
+    "robosuite": {
+      "repository": "https://github.com/RLinf/robosuite",
+      "branch": "rpent"
+    },
+    "rldx_checkpoint": {
+      "repository": "RLWRLD/RLDX-1-FT-RC365",
+      "revision": "587e9ecdcc5e7184fcc17f58713908edff5af041"
+    },
+    "rldx_support": {
+      "repository": "RLWRLD/RLDX-1-VLM",
+      "revision": "4b9f870d1287e0d38d7eb1445e6d8c60afe66dd7",
+      "include_patterns": [
+        "*.json",
+        "*.txt",
+        "*.jinja",
+        "*.md",
+        "*.png",
+        ".gitattributes"
+      ],
+      "exclude_patterns": [
+        "*.safetensors.index.json"
+      ],
+      "file_count": 15,
+      "download_weights": false
+    },
+    "task_memory": {
+      "repository": "RLinf/RPent-memory",
+      "repository_type": "dataset",
+      "include_pattern": "robocasa/**"
+    }
+  },
+  "planner_reference": {
+    "planner": "codex",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh",
+    "max_turns": 100,
+    "runtime_is_planner_agnostic": true
+  },
+  "runtime_protocol": {
+    "scene_seed_source": "cli_seed_identity",
+    "use_reset_seed_override": false,
+    "result_schema_version": "1.1",
+    "result_filename": "result.json",
+    "rldx_max_chunks": 40,
+    "rldx_settle_patience": 999,
+    "rldx_action_steps_per_chunk": 8
+  },
+  "memory_policy": {
+    "policy": "none",
+    "scope": "no_historical_memory",
+    "read_strategy": "disabled"
+  },
+  "retry_policy": {
+    "retry_infrastructure_failure_without_valid_environment_result": true,
+    "retry_valid_task_failure": false,
+    "retry_planner_timeout": false
+  },
+  "splits": {
+    "composite_seen": {
+      "task_count": 16,
+      "seeds": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "timeout_seconds": 3600,
+      "cell_count": 80,
+      "tasks": [
+        "ScrubCuttingBoard",
+        "StackBowlsCabinet",
+        "WashLettuce",
+        "RinseSinkBasin",
+        "PreSoakPan",
+        "StirVegetables",
+        "LoadDishwasher",
+        "SteamInMicrowave",
+        "SetUpCuttingStation",
+        "GetToastedBread",
+        "DeliverStraw",
+        "KettleBoiling",
+        "PrepareCoffee",
+        "StoreLeftoversInBowl",
+        "SearingMeat",
+        "PackIdenticalLunches"
+      ]
+    },
+    "composite_unseen": {
+      "task_count": 16,
+      "seeds": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "timeout_seconds": 3600,
+      "cell_count": 80,
+      "tasks": [
+        "ArrangeBreadBasket",
+        "ArrangeTea",
+        "BreadSelection",
+        "CategorizeCondiments",
+        "CuttingToolSelection",
+        "GarnishPancake",
+        "GatherTableware",
+        "HeatKebabSandwich",
+        "MakeIceLemonade",
+        "PanTransfer",
+        "PortionHotDogs",
+        "RecycleBottlesByType",
+        "SeparateFreezerRack",
+        "WaffleReheat",
+        "WashFruitColander",
+        "WeighIngredients"
+      ]
+    }
+  },
+  "experiment": "no_privileged_info_no_planner_pose_with_simulator_success",
+  "ablation": {
+    "unavailable": [
+      "back_project_batch",
+      "query_world_map",
+      "historical_memory",
+      "success_criteria_source",
+      "agent_elapsed_s",
+      "base_clip",
+      "base_drift",
+      "base_moved",
+      "base_pos",
+      "chunks",
+      "eef",
+      "effective_max_chunks",
+      "effective_n_action_steps",
+      "effective_prompt",
+      "effective_settle_patience",
+      "elapsed_s",
+      "executed_steps",
+      "final_dist",
+      "grasp_contact",
+      "grasp_detected",
+      "grasp_obj",
+      "grasped",
+      "gripper_qpos",
+      "held_apart",
+      "moved",
+      "ok",
+      "peak_lift",
+      "prompt",
+      "prompt_overridden",
+      "requested_prompt",
+      "reset",
+      "robot0_base_pos",
+      "robot0_base_quat",
+      "robot0_base_to_eef_pos",
+      "robot0_base_to_eef_quat",
+      "robot0_eef_pos",
+      "robot0_eef_quat",
+      "robot0_gripper_qpos",
+      "stage",
+      "start_pos",
+      "status",
+      "steps",
+      "steps_applied",
+      "stuck",
+      "task_progress",
+      "video",
+      "vla_desync"
+    ],
+    "retained": [
+      "native_success",
+      "native_success_early_stopping",
+      "rgb_observations",
+      "vla_and_controller_internal_proprioception",
+      "vla_control_and_history",
+      "current_episode_history",
+      "agent_issued_action_parameters",
+      "fixed_prompt_priors",
+      "image_history_step_index",
+      "agent_finish_declaration"
+    ],
+    "geometry_scope": "Agent tools; simulator depth/world artifacts remain internal",
+    "file_boundary": "RPent text file tools; not an operating-system sandbox",
+    "planner_pose_scope": "Planner robot-state measurements and normal action-execution summaries are omitted from current, historical and saved observations/results; internal VLA/controller state and control decisions remain intact",
+    "retained_gripper_fields": [],
+    "retained_status_fields": [
+      "success",
+      "robocasa_terminated"
+    ],
+    "normal_robot_state": {},
+    "normal_action_result": {},
+    "field_scope": "Removed feedback names apply to outputs only. Agent command arguments, including prompt, steps and finish(status), remain inputs; observation step remains an image/history index.",
+    "timing_scope": "No action elapsed_s in Agent returns or saved action logs; internal framework runtime measurement remains available.",
+    "prompt_feedback": "RGB for intermediate progress; native simulator success for task completion. No requirements to read gripper, action status, cap or vla_desync.",
+    "hidden_feedback_fields": [
+      "agent_elapsed_s",
+      "base_clip",
+      "base_drift",
+      "base_moved",
+      "base_pos",
+      "chunks",
+      "eef",
+      "effective_max_chunks",
+      "effective_n_action_steps",
+      "effective_prompt",
+      "effective_settle_patience",
+      "elapsed_s",
+      "executed_steps",
+      "final_dist",
+      "grasp_contact",
+      "grasp_detected",
+      "grasp_obj",
+      "grasped",
+      "gripper_qpos",
+      "held_apart",
+      "moved",
+      "ok",
+      "peak_lift",
+      "prompt",
+      "prompt_overridden",
+      "requested_prompt",
+      "reset",
+      "robot0_base_pos",
+      "robot0_base_quat",
+      "robot0_base_to_eef_pos",
+      "robot0_base_to_eef_quat",
+      "robot0_eef_pos",
+      "robot0_eef_quat",
+      "robot0_gripper_qpos",
+      "stage",
+      "start_pos",
+      "status",
+      "steps",
+      "steps_applied",
+      "stuck",
+      "task_progress",
+      "video",
+      "vla_desync"
+    ]
+  },
+  "source_base": "a744bd5f128ebef3cb8c6736cf7cd98adff681f1",
+  "title": "Combined information removal with RGB and native success feedback",
+  "variant": "no_privileged_info_no_planner_pose",
+  "evaluation_status": "expanded_feedback_removal_smoke_and_full_evaluation_pending",
+  "source_parent": "5e612e916c011bcc76431efd1775040f86563fef",
+  "prior_validation": {
+    "scope": "Earlier pose/movement-only interface; gripper and action diagnostics still exposed",
+    "agent_smoke_seconds": 353.2,
+    "agent_max_responses": 20,
+    "native_success": false,
+    "agent_finish_observed": false,
+    "validates_current_output_contract": false
+  }
+}

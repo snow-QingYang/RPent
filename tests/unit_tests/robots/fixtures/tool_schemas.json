@@ -428,7 +428,7 @@
       },
       {
         "name": "rldx_skill",
-        "description": "RLDX VLA closed-loop skill — FULL base motion allowed. The VLA drives both arm and mobile base. Use for full-body tasks where the base must reposition (e.g. navigating to a counter while reaching). Pass the complete live task_language verbatim; the runtime always uses that environment language for RLDX. Do NOT interrupt consecutive VLA calls with manual primitives — that breaks VLA frame history continuity (sets vla_desync=True).",
+        "description": "RLDX VLA closed-loop skill — FULL base motion allowed. The VLA drives both arm and mobile base. Use for full-body tasks where the base must reposition (e.g. navigating to a counter while reaching). Pass the complete live task_language verbatim; the runtime always uses that environment language for RLDX. Do NOT interrupt consecutive VLA calls with manual primitives — that breaks VLA frame history continuity.",
         "input_schema": {
           "type": "object",
           "properties": {
@@ -498,7 +498,7 @@
       },
       {
         "name": "view_env_state",
-        "description": "Read step NN from states.json + the matching state images in the output dir. If step is null, returns the latest entry. Each entry contains robot proprioception, task language, success, robocasa_terminated, vla_desync, and the action log. Embeds available PNGs as multimodal image content blocks. Use current agentview images to identify objects and fixtures, navview to inspect navigation paths, and wrist images for close-range inspection.",
+        "description": "Read the RGB images, task language, native task success and command history at step NN. If step is null, returns the latest entry. Robot poses, gripper measurements, action completion or stopping status, and execution counts are not provided. Embeds available PNGs as multimodal image content blocks. Use current agentview images to identify objects and fixtures, navview to inspect navigation paths, and wrist images for close-range inspection.",
         "input_schema": {
           "type": "object",
           "properties": {

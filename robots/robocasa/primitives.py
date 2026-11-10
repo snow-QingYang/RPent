@@ -210,8 +210,6 @@ class RoboCasaPrimitives:
                     data={
                         "ok": True,
                         "steps": i,
-                        "final_dist": dist,
-                        "eef": cur.tolist(),
                         "gripper_qpos": round(float(self.env.gripper_qpos[0]), 4),
                     }
                 )
@@ -225,13 +223,10 @@ class RoboCasaPrimitives:
             self.env.step(a)
             if self._recording:
                 self.record_frame()
-        cur = self.env.eef_pos
         return ToolResult(
             data={
                 "ok": False,
                 "steps": max_steps,
-                "final_dist": float(np.linalg.norm(target - cur)),
-                "eef": cur.tolist(),
                 "gripper_qpos": round(float(self.env.gripper_qpos[0]), 4),
             }
         )
@@ -272,7 +267,7 @@ class RoboCasaPrimitives:
         per = float(np.clip(target_pitch, -1.5, 1.5)) / n
         for _ in range(n):
             self._step_arm(drot=(per, 0, 0), gripper=gripper, n=1)
-        return ToolResult(data={"ok": True, "eef": self.env.eef_pos.tolist()})
+        return ToolResult(data={"ok": True})
 
     @tool
     def set_gripper(self, gripper: float = 1, steps: int = 10) -> ToolResult:
@@ -340,7 +335,6 @@ class RoboCasaPrimitives:
             data={
                 "ok": True,
                 "gripper_qpos": self.env.gripper_qpos.tolist(),
-                "eef": self.env.eef_pos.tolist(),
             }
         )
 
@@ -378,7 +372,6 @@ class RoboCasaPrimitives:
             np.clip(lateral, -1, 1),
             np.clip(turn, -1, 1),
         ]
-        bp0, _ = self._base_pose()
         for _ in range(steps):
             a[6] = self._resolve_grip(gripper, target_q)
             if self._check_cancelled is not None:
@@ -386,14 +379,7 @@ class RoboCasaPrimitives:
             self.env.step(a)
             if self._recording:
                 self.record_frame()
-        bp1, _ = self._base_pose()
-        return ToolResult(
-            data={
-                "ok": True,
-                "base_moved": (bp1 - bp0).tolist(),
-                "base_pos": bp1.tolist(),
-            }
-        )
+        return ToolResult(data={"ok": True})
 
     def _yaw(self):
         from scipy.spatial.transform import Rotation as R
@@ -454,15 +440,10 @@ class RoboCasaPrimitives:
             dist = float(np.linalg.norm(to))
             if dist < tol:
                 self._pos_jac = None  # base moved -> recalibrate arm
-                moved = float(np.linalg.norm(bp[:2] - start))
                 return ToolResult(
                     data={
                         "ok": True,
                         "steps": i,
-                        "final_dist": dist,
-                        "moved": moved,
-                        "start_pos": start.tolist(),
-                        "base_pos": bp.tolist(),
                     }
                 )
             world_dir = np.arctan2(to[1], to[0])
@@ -488,11 +469,7 @@ class RoboCasaPrimitives:
             data={
                 "ok": False,
                 "steps": max_steps,
-                "final_dist": float(np.linalg.norm(target - bp[:2])),
-                "moved": moved,
                 "stuck": moved < 0.12,
-                "start_pos": start.tolist(),
-                "base_pos": bp.tolist(),
             }
         )
 
@@ -525,7 +502,9 @@ class RoboCasaPrimitives:
 
     # ---- Phase 1: perception (state dict + rendered arrays) ----
     def current_state_dict(self) -> dict:
-        """Return the proprio + task + success state dict (NO object coords).
+        """Return task and native success for Planner observations.
+
+        Robot poses and gripper state remain internal to controllers and VLA.
 
         Rendered RGB/depth/world arrays are produced by the caller via
         ``_render_observation_artifacts`` (kept out of primitives so the primitives
@@ -536,13 +515,7 @@ class RoboCasaPrimitives:
             "task_language": o.get("language", self.env.get_task_language()) or "",
             "success": self.env.check_success(),
             "robocasa_terminated": self.env.terminated,
-            "state": {
-                "robot0_eef_pos": self.env.eef_pos.tolist(),
-                "robot0_eef_quat": self.env.eef_quat.tolist(),
-                "robot0_gripper_qpos": self.env.gripper_qpos.tolist(),
-                "robot0_base_pos": np.asarray(o["robot0_base_pos"]).tolist(),
-                "robot0_base_quat": np.asarray(o["robot0_base_quat"]).tolist(),
-            },
+            "state": {},
         }
 
     # ---- VLA execution ----
@@ -630,9 +603,7 @@ class RoboCasaPrimitives:
         self._pos_jac = None
         self._fwd_offset = None
         self._rldx.reset_session()
-        return ToolResult(
-            data={"ok": True, "reset": True, "eef": self.env.eef_pos.tolist()}
-        )
+        return ToolResult(data={"ok": True, "reset": True})
 
     # ---- VLA wrappers (public API for execute) ----
     @tool(exclude=("use_prompt",))
@@ -648,7 +619,7 @@ class RoboCasaPrimitives:
         settle_patience: int = int(os.environ.get("RLDX_SETTLE_PATIENCE", 999)),
         settle_eps: float = 0.012,
     ) -> ToolResult:
-        """RLDX VLA closed-loop skill — FULL base motion allowed. The VLA drives both arm and mobile base. Use for full-body tasks where the base must reposition (e.g. navigating to a counter while reaching). Pass the complete live task_language verbatim; the runtime always uses that environment language for RLDX. Do NOT interrupt consecutive VLA calls with manual primitives — that breaks VLA frame history continuity (sets vla_desync=True).
+        """RLDX VLA closed-loop skill — FULL base motion allowed. The VLA drives both arm and mobile base. Use for full-body tasks where the base must reposition (e.g. navigating to a counter while reaching). Pass the complete live task_language verbatim; the runtime always uses that environment language for RLDX. Do NOT interrupt consecutive VLA calls with manual primitives — that breaks VLA frame history continuity.
 
         Args:
             prompt: Complete live task_language, copied verbatim

@@ -224,8 +224,8 @@ class RLDXSkill:
         Stops when: env `success` fires / the VLA SETTLES (eef+gripper stop changing for
         `settle_patience` chunks = it's done) / `max_chunks` safety cap.
         base_clip=None -> full base motion; base_clip=v -> clamp base_motion to [-v,v]
-        (whole-body policy: never zero it). Returns execution status and robot
-        proprioception; object contact and contact-derived grasp labels are omitted."""
+        (whole-body policy: never zero it). Returns execution status and gripper
+        feedback; robot pose, motion distances and contact labels are omitted."""
         self._load()
         # Start a fresh video buffer for this run() call (no-op if RLDX_VIDEO_DIR unset).
         self._frames = [] if self._video_dir is not None else None
@@ -247,13 +247,8 @@ class RLDXSkill:
         if new_task or not self._hist:
             self._seed_hist(prompt)
         fresh = new_task
-        base0 = np.asarray(self.env.current_raw_obs["robot0_base_pos"], np.float64)[
-            :2
-        ].copy()
         eef_prev = np.asarray(self.env.eef_pos, np.float64).copy()
         grip_prev = float(self.env.gripper_qpos[0])
-        eef_min_z = float(self.env.eef_pos[2])
-        peak_lift = 0.0
         applied = 0
         settled = 0
         status = "cap"
@@ -305,8 +300,6 @@ class RLDXSkill:
                 break
             eef_now = np.asarray(self.env.eef_pos, np.float64)
             grip_now = float(self.env.gripper_qpos[0])
-            eef_min_z = min(eef_min_z, float(eef_now[2]))
-            peak_lift = max(peak_lift, float(eef_now[2] - eef_min_z))
             if (
                 float(np.linalg.norm(eef_now - eef_prev)) < settle_eps
                 and abs(grip_now - grip_prev) < 0.003
@@ -320,7 +313,6 @@ class RLDXSkill:
             eef_prev = eef_now.copy()
             grip_prev = grip_now
         grip = float(self.env.gripper_qpos[0])
-        base1 = np.asarray(self.env.current_raw_obs["robot0_base_pos"], np.float64)[:2]
         # Command + finger-width heuristic only; this does not identify an object
         # or establish that a grasp succeeded.
         held_apart = bool(last_cmd_close and 0.004 < grip < 0.039)
@@ -334,9 +326,7 @@ class RLDXSkill:
             "steps_applied": applied,
             "held_apart": held_apart,
             "gripper_qpos": round(grip, 3),
-            "peak_lift": round(peak_lift, 3),
             "base_clip": base_clip,
-            "base_drift": round(float(np.linalg.norm(base1 - base0)), 3),
         }
         if video_path:
             result["video"] = video_path

@@ -24,7 +24,7 @@ state automatically through :meth:`RoboCasaToolkit.get_env_state`.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import numpy as np
 from pydantic import Field
@@ -63,6 +63,68 @@ _CAMERA_WORLD_ARTIFACTS = {
 }
 
 
+_PLANNER_HIDDEN_FEEDBACK_FIELDS = frozenset(
+    {
+        "robot0_eef_pos",
+        "robot0_eef_quat",
+        "robot0_base_pos",
+        "robot0_base_quat",
+        "robot0_base_to_eef_pos",
+        "robot0_base_to_eef_quat",
+        "eef",
+        "base_pos",
+        "start_pos",
+        "final_dist",
+        "base_moved",
+        "moved",
+        "peak_lift",
+        "base_drift",
+        "robot0_gripper_qpos",
+        "gripper_qpos",
+        "held_apart",
+        "ok",
+        "stuck",
+        "status",
+        "stage",
+        "steps",
+        "steps_applied",
+        "executed_steps",
+        "chunks",
+        "vla_desync",
+        "elapsed_s",
+        "agent_elapsed_s",
+        "prompt",
+        "base_clip",
+        "video",
+        "reset",
+        "effective_prompt",
+        "effective_max_chunks",
+        "effective_n_action_steps",
+        "effective_settle_patience",
+        "prompt_overridden",
+        "requested_prompt",
+        "task_progress",
+        "grasped",
+        "grasp_detected",
+        "grasp_contact",
+        "grasp_obj",
+    }
+)
+
+
+def _without_robot_feedback(value: Any) -> Any:
+    """Filter robot state and action results, never Agent-issued commands."""
+    if isinstance(value, dict):
+        return {
+            key: _without_robot_feedback(child)
+            for key, child in value.items()
+            if key not in _PLANNER_HIDDEN_FEEDBACK_FIELDS
+        }
+    if isinstance(value, list):
+        return [_without_robot_feedback(child) for child in value]
+    return value
+
+
 def dump_state(
     primitives: RoboCasaPrimitives,
     env_state: EnvState,
@@ -70,7 +132,7 @@ def dump_state(
 ) -> StepRecord:
     """Record one RoboCasa observation through its owned state record.
 
-    Appends a new :class:`StepRecord` (proprio + task + success + vla_desync)
+    Appends a new :class:`StepRecord` (task + native success + command)
     via :meth:`EnvState.record_step`, saves the rendered RGB / depth / world
     artifacts for that step, and prunes heavy npy artifacts that fell out of
     the ``_keep_heavy`` window.
@@ -78,16 +140,14 @@ def dump_state(
     state_dict = primitives.current_state_dict()
     log = log or {}
     with env_state.record_step(
-        state=state_dict["state"],
+        state=_without_robot_feedback(state_dict["state"]),
         terminated=state_dict["robocasa_terminated"],
         truncated=False,
         command=log.get("command"),
-        result=log.get("result"),
-        elapsed_s=log.get("elapsed_s"),
+        result=_without_robot_feedback(log.get("result")),
         extras={
             "task_language": state_dict["task_language"],
             "success": state_dict["success"],
-            "vla_desync": primitives._vla_desync,
         },
     ) as step_idx:
         _save_observation_artifacts(primitives, env_state, step_idx)
@@ -157,7 +217,7 @@ def _save_observation_artifacts(
 
 @tool(readonly=True, exclude=("state",))
 def view_env_state(step: int | None = None, *, state: EnvState) -> ToolResult:
-    """Read step NN from states.json + the matching state images in the output dir. If step is null, returns the latest entry. Each entry contains robot proprioception, task language, success, robocasa_terminated, vla_desync, and the action log. Embeds available PNGs as multimodal image content blocks. Use current agentview images to identify objects and fixtures, navview to inspect navigation paths, and wrist images for close-range inspection.
+    """Read the RGB images, task language, native task success and command history at step NN. If step is null, returns the latest entry. Robot poses, gripper measurements, action completion or stopping status, and execution counts are not provided. Embeds available PNGs as multimodal image content blocks. Use current agentview images to identify objects and fixtures, navview to inspect navigation paths, and wrist images for close-range inspection.
 
     Args:
         step: Step number; 0 = initial. Null = latest.
@@ -173,14 +233,12 @@ def view_env_state(step: int | None = None, *, state: EnvState) -> ToolResult:
     out: dict = {
         "step": nn,
         "task_language": extras.get("task_language", ""),
-        "state": record.state,
+        "state": _without_robot_feedback(record.state),
         "robocasa_terminated": record.terminated,
-        "vla_desync": extras.get("vla_desync", False),
         "success": extras.get("success", False),
         "log": {
             "command": record.command,
-            "result": record.result,
-            "elapsed_s": record.elapsed_s,
+            "result": _without_robot_feedback(record.result),
         },
         "images": [],
     }
