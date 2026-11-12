@@ -1,9 +1,10 @@
-# Combined RoboCasa ablation with simulator success feedback
+# Combined RoboCasa ablation with Planner robot pose and simulator success
 
-Branch: `no_privileged_info`. Official runtime base:
+Branch: `no_privileged_info_with_planner_pose`. Official runtime base:
 `a744bd5f128ebef3cb8c6736cf7cd98adff681f1`, matching the previous composite baseline.
 This evaluation combines the geometry-tool, historical-memory, task-progress,
-and contact-feedback ablations. Simulator success remains available.
+and contact-feedback ablations. The Planner receives robot end-effector and
+base positions and orientations. Simulator success remains available.
 
 | Information | Evaluation behavior |
 | --- | --- |
@@ -13,6 +14,7 @@ and contact-feedback ablations. Simulator success remains available.
 | Contact/grasp labels | VLA does not query object contact or return `grasp_contact`, `grasp_obj`, `grasped`, or `grasp_detected`. |
 | Success-rule source | `success_criteria.md` is not generated; RPent text-file tools cannot read source or other text files. |
 | Native success | `success`, `robocasa_terminated`, successful VLA early stopping and final native scoring are retained. |
+| Planner robot pose | End-effector and base positions and orientations remain visible to the Agent. |
 | Observations/control | RGB, base/arm/gripper proprioception, VLA inputs/history, manual actions and current-episode interaction history are retained. |
 
 `held_apart` remains a command/finger-width heuristic, not a verified grasp.
@@ -75,6 +77,7 @@ the unit tests; the bounded smoke did not establish task success.
 
 ## 中文说明
 
+分支 `no_privileged_info_with_planner_pose` 保留 Agent 可见的机器人末端与底盘位姿。
 本分支合并此前四项消融：禁用两个主动三维查询工具、历史 memory、task_progress、
 模拟器接触及接触派生的抓取提示；同时取消生成成功判据源码，并限制文本文件读取。
 保留 simulator success、成功早停、原生最终评分，以及相机图像、底盘／末端／夹爪
