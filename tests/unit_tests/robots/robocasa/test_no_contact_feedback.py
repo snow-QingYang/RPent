@@ -222,20 +222,14 @@ def test_consecutive_calls_preserve_policy_memory_and_frame_history(
 
 
 @pytest.mark.parametrize(
-    "task,progress,expected",
+    "task,progress",
     [
         (
             "ScrubCuttingBoard",
             {"board_contact_timer": 6, "sweep_range": 0.2, "gripper_obj_far": True},
-            {"gripper_obj_far": True},
         ),
         (
             "PrepareCoffee",
-            {
-                "contact_check": True,
-                "gripper_obj_far": True,
-                "coffee_machine__turned_on": True,
-            },
             {
                 "contact_check": True,
                 "gripper_obj_far": True,
@@ -253,12 +247,32 @@ def test_consecutive_calls_preserve_policy_memory_and_frame_history(
                 "gripper_far_lemon": True,
                 "gripper_far_ice": True,
             },
-            {"gripper_far_lemon": True, "gripper_far_ice": True},
+        ),
+        (
+            "PanTransfer",
+            {
+                "_robot_touched_food": True,
+                "vegetable_on_plate": False,
+                "pan_on_stove": True,
+            },
+        ),
+        (
+            "KettleBoiling",
+            {
+                "obj_on_stove": True,
+                "dist": 0.1,
+                "kettle_on_site": True,
+                "burner_on": False,
+            },
+        ),
+        (
+            "AnotherTask",
+            {"grasped": True, "contact_timer": 5, "future_progress_field": 0.3},
         ),
     ],
 )
-def test_progress_filters_contact_derivatives_and_preserves_success(
-    execution, task: str, progress: dict[str, Any], expected: dict[str, Any]
+def test_native_progress_is_unchanged_including_contact_derivatives(
+    execution, task: str, progress: dict[str, Any]
 ) -> None:
     primitives, env, _ = execution
     env.task_name = task
@@ -267,17 +281,17 @@ def test_progress_filters_contact_derivatives_and_preserves_success(
 
     state = primitives.current_state_dict()
 
-    assert state["task_progress"] == expected
+    assert state["task_progress"] == progress
     assert state["success"] is True
     assert state["robocasa_terminated"] is True
     assert state["state"]["robot0_gripper_qpos"] == [0.02, 0.02]
-    assert env.progress == progress  # Filtering must not mutate simulator results.
+    assert env.progress == progress
 
 
 def test_saved_states_and_history_do_not_reintroduce_contact_feedback(
     execution, tmp_path: Path
 ) -> None:
-    primitives, _, _ = execution
+    primitives, env, _ = execution
     run_dir = tmp_path / "run"
     state = EnvState(run_dir)
     returned = []
@@ -293,16 +307,16 @@ def test_saved_states_and_history_do_not_reintroduce_contact_feedback(
     # Exercise the actual latest and historical state tools, including image IO.
     for requested_step, expected_step in ((None, 1), (0, 0), (1, 1)):
         response = tools.view_env_state(step=requested_step, state=state)
-        _assert_no_contact_fields(response.data)
+        _assert_no_contact_fields(response.data["log"]["result"])
         assert response.data["step"] == expected_step
         assert response.data["log"]["result"] == returned[expected_step]
-        assert response.data["task_progress"] == {"gripper_obj_far": False}
+        assert response.data["task_progress"] == env.progress
         assert len(response.data["images"]) == 3
 
     persisted = json.loads((run_dir / "states.json").read_text())
-    _assert_no_contact_fields(persisted)
     assert len(persisted["steps"]) == 2
     for record in persisted["steps"]:
-        assert record["extras"]["task_progress"] == {"gripper_obj_far": False}
+        _assert_no_contact_fields(record["result"])
+        assert record["extras"]["task_progress"] == env.progress
         assert record["result"]["held_apart"] is True
         assert record["result"]["gripper_qpos"] == 0.02

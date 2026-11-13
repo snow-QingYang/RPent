@@ -26,57 +26,6 @@ from rpent.tools import ToolResult, tool
 OSC_POS_SCALE = 0.05  # action 1.0 -> 0.05 m target delta
 OSC_ROT_SCALE = 0.5  # action 1.0 -> 0.5 rad
 
-# Contact-derived scalars exposed by the 32 Target50 composite tasks. This is
-# task-specific: PrepareCoffee.contact_check is geometric and remains available,
-# whereas ScrubCuttingBoard.sweep_range is calculated from contact positions.
-# Some locals exist only inside a contact-dependent branch (e.g. KettleBoiling),
-# so their presence would also disclose contact. Simulator state is never changed.
-_CONTACT_PROGRESS_FIELDS: dict[str, frozenset[str]] = {
-    "ScrubCuttingBoard": frozenset({"board_contact_timer", "sweep_range"}),
-    "StackBowlsCabinet": frozenset({"bowl2_in_bowl1", "bowl1_in_bowl2"}),
-    "StirVegetables": frozenset({"success_time"}),
-    "LoadDishwasher": frozenset(
-        {"check1", "check2", "all_checks_passed", "are_dishes_correctly_placed"}
-    ),
-    "SteamInMicrowave": frozenset({"vegetable_in_bowl"}),
-    "SetUpCuttingStation": frozenset({"meat_on_board", "knife_on_board"}),
-    "GetToastedBread": frozenset(
-        {"toast_in_slot", "toast_slot", "slot_pair", "toaster_on"}
-    ),
-    "DeliverStraw": frozenset({"straw_in_glass_cup"}),
-    "KettleBoiling": frozenset({"obj_on_stove", "dist", "kettle_on_site", "burner_on"}),
-    "StoreLeftoversInBowl": frozenset({"chicken_in_bowl", "vegetable_in_bowl"}),
-    "SearingMeat": frozenset({"pan_loc", "meat_in_pan"}),
-    "PackIdenticalLunches": frozenset(
-        {"tupper0_valid", "tupper1_valid", "no_duplicates", "gripper_far"}
-    ),
-    "ArrangeBreadBasket": frozenset({"bread_in_basket", "basket_on_counter"}),
-    "ArrangeTea": frozenset({"obj1_container_contact", "obj2_container_contact"}),
-    "CuttingToolSelection": frozenset(
-        {"peeler_on_cutting_board", "knife_on_cutting_board", "correct_tool_chosen"}
-    ),
-    "GarnishPancake": frozenset(
-        {"strawberry_on_pancake", "pancake_on_plate", "plate_on_table"}
-    ),
-    "HeatKebabSandwich": frozenset({"baguette_in_toaster", "kebab_in_toaster"}),
-    "MakeIceLemonade": frozenset(
-        {"lemon_in_cup", "ice1_in_cup", "ice2_in_cup", "ice_in_cup", "success"}
-    ),
-    "PanTransfer": frozenset(
-        {"_robot_touched_food", "vegetable_on_plate", "pan_on_stove"}
-    ),
-    "PortionHotDogs": frozenset(
-        {"buns_in_plate1", "sausages_in_plate1", "buns_in_plate2", "sausages_in_plate2"}
-    ),
-    "RecycleBottlesByType": frozenset({"on_table"}),
-    "SeparateFreezerRack": frozenset(
-        {"meat_in_tupperware", "veg1_in_tupperware", "veg2_in_tupperware"}
-    ),
-    "WaffleReheat": frozenset({"waffle_in_bowl"}),
-    "WashFruitColander": frozenset({"fruit_in_colander"}),
-    "WeighIngredients": frozenset({"packaged_food_on_digital_scale"}),
-}
-
 
 class RoboCasaPrimitives:
     def __init__(
@@ -556,17 +505,23 @@ class RoboCasaPrimitives:
         return self.env.get_success_criteria_text()
 
     def task_progress(self):
-        """Return native task progress with reviewed contact-derived fields omitted.
-
-        Filtering applies to the Target50 composite tasks, before state persistence
-        and tool output. Other metrics and the simulator's own state are retained.
-        """
+        """NUMERIC progress signal toward this task's success — generic for ALL tasks.
+        The state json only exposes the final `success` bool; an agent driving a task
+        whose success is a COUNTER/THRESHOLD (washed_time>=25, success_time>=5) or a set
+        of sub-predicates (gripper_obj_far, is_dishwasher_closed, contact_check) is then
+        flying blind — it can't tell water-on from water-off, or 3/25 from 24/25.
+        We surface the env's OWN intermediate quantities WITHOUT hand-coding any task:
+          1) self.<attr> int/float/bool COUNTERS/FLAGS referenced in _check_success
+             (washed_time, success_time, _turned_on, ...), read live.
+          2) the INTERMEDIATE LOCALS the real _check_success computes this step
+             (each sub-predicate bool / distance / range), captured by tracing one
+             read-only call of _check_success.
+        This is the success CRITERION's current value — NOT ground-truth object coords
+        (the agent still localizes objects from perception)."""
         try:
-            progress = self.env.get_task_progress()
+            return self.env.get_task_progress()
         except Exception:
             return {}
-        omitted = _CONTACT_PROGRESS_FIELDS.get(self.env.task_name, frozenset())
-        return {key: value for key, value in progress.items() if key not in omitted}
 
     # ---- Phase 1: perception (state dict + rendered arrays) ----
     def current_state_dict(self) -> dict:
