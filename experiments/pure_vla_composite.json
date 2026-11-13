@@ -1,0 +1,183 @@
+{
+  "schema_version": "1.0",
+  "result_schema_version": "1.0",
+  "protocol_id": "robocasa-pure-vla-composite-v1",
+  "experiment_id": "pure_vla",
+  "benchmark": "RoboCasa365",
+  "environment_split": "target",
+  "total_tasks": 32,
+  "total_cells": 160,
+  "n_action_steps": 8,
+  "task_horizons": {
+    "DeliverStraw": 1700,
+    "GetToastedBread": 2000,
+    "KettleBoiling": 1000,
+    "LoadDishwasher": 1200,
+    "PackIdenticalLunches": 2600,
+    "PreSoakPan": 1600,
+    "PrepareCoffee": 1200,
+    "RinseSinkBasin": 900,
+    "ScrubCuttingBoard": 800,
+    "SearingMeat": 2900,
+    "SetUpCuttingStation": 1600,
+    "StackBowlsCabinet": 1400,
+    "SteamInMicrowave": 1400,
+    "StirVegetables": 1600,
+    "StoreLeftoversInBowl": 1700,
+    "WashLettuce": 1100,
+    "ArrangeBreadBasket": 2900,
+    "ArrangeTea": 1500,
+    "BreadSelection": 1300,
+    "CategorizeCondiments": 1100,
+    "CuttingToolSelection": 800,
+    "GarnishPancake": 1800,
+    "GatherTableware": 1500,
+    "HeatKebabSandwich": 1800,
+    "MakeIceLemonade": 2000,
+    "PanTransfer": 1200,
+    "PortionHotDogs": 1500,
+    "RecycleBottlesByType": 1900,
+    "SeparateFreezerRack": 1600,
+    "WaffleReheat": 2700,
+    "WashFruitColander": 2100,
+    "WeighIngredients": 2000
+  },
+  "splits": {
+    "composite_seen": {
+      "tasks": [
+        "ScrubCuttingBoard",
+        "StackBowlsCabinet",
+        "WashLettuce",
+        "RinseSinkBasin",
+        "PreSoakPan",
+        "StirVegetables",
+        "LoadDishwasher",
+        "SteamInMicrowave",
+        "SetUpCuttingStation",
+        "GetToastedBread",
+        "DeliverStraw",
+        "KettleBoiling",
+        "PrepareCoffee",
+        "StoreLeftoversInBowl",
+        "SearingMeat",
+        "PackIdenticalLunches"
+      ],
+      "seeds": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "task_count": 16,
+      "cell_count": 80
+    },
+    "composite_unseen": {
+      "tasks": [
+        "ArrangeBreadBasket",
+        "ArrangeTea",
+        "BreadSelection",
+        "CategorizeCondiments",
+        "CuttingToolSelection",
+        "GarnishPancake",
+        "GatherTableware",
+        "HeatKebabSandwich",
+        "MakeIceLemonade",
+        "PanTransfer",
+        "PortionHotDogs",
+        "RecycleBottlesByType",
+        "SeparateFreezerRack",
+        "WaffleReheat",
+        "WashFruitColander",
+        "WeighIngredients"
+      ],
+      "seeds": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "task_count": 16,
+      "cell_count": 80
+    }
+  },
+  "dependencies": {
+    "rpent_runtime": {
+      "repository": "https://github.com/RLinf/RPent",
+      "commit": "a744bd5f128ebef3cb8c6736cf7cd98adff681f1"
+    },
+    "rldx": {
+      "repository": "https://github.com/RLinf/RLDX-1",
+      "commit": "ebcfd13df5177e4b3e574bdf5a3b427c7c4a1e8a"
+    },
+    "robocasa": {
+      "repository": "https://github.com/RLinf/robocasa",
+      "commit": "2692d8fc5fd86708a1b2028dcbce892ec418a9e7"
+    },
+    "robosuite": {
+      "repository": "https://github.com/RLinf/robosuite",
+      "commit": "97cfbde4b68d8ec43dad20cf4747297866a6ca2e"
+    },
+    "checkpoint": {
+      "repository": "RLWRLD/RLDX-1-FT-RC365",
+      "revision": "587e9ecdcc5e7184fcc17f58713908edff5af041"
+    },
+    "backbone": {
+      "repository": "RLWRLD/RLDX-1-VLM",
+      "revision": "4b9f870d1287e0d38d7eb1445e6d8c60afe66dd7"
+    }
+  },
+  "horizon_source": {
+    "repository": "https://github.com/RLinf/RLDX-1",
+    "commit": "ebcfd13df5177e4b3e574bdf5a3b427c7c4a1e8a",
+    "path": "run_scripts/eval/robocasa_365/task_sets.yaml"
+  },
+  "policy_seed": {
+    "algorithm": "sha256-prefix-u32",
+    "namespace": "rpent-pure-vla-v1",
+    "encoding": "UTF-8",
+    "message": "{namespace}:{task_name}:{seed}",
+    "integer_byteorder": "big",
+    "digest_bytes": 4
+  },
+  "scene_seed": {
+    "constructor": "cli_seed",
+    "reset_seed_override": false,
+    "video_recording_seed_override": false,
+    "same_seed_is_not_proof_of_equal_initial_state": true,
+    "python_hash_seed": 0
+  },
+  "runtime": {
+    "n_envs": 1,
+    "n_episodes_per_cell": 1,
+    "watchdog_timeout_s": 7200,
+    "planner": null,
+    "planner_memory": "none",
+    "policy_temporal_memory": "preserved",
+    "success_in_policy_observation": false,
+    "geometry_or_contact_in_policy_observation": false
+  },
+  "scoring": {
+    "primary": "any_success",
+    "secondary": "final_state_success",
+    "source": "environment_native_check_success",
+    "check_frequency": "every_native_action",
+    "stop_frequency": "official_chunk_boundary",
+    "horizon_unit": "native_action_steps",
+    "cache_final_state_before_reset": true
+  },
+  "retry_policy": {
+    "max_infrastructure_attempts": 3,
+    "retry_valid_task_failure": false,
+    "incomplete_or_corrupt_result_is_not_completed": true,
+    "archive_old_attempts": true,
+    "skip_requires_valid_result": true
+  },
+  "comparison_limits": [
+    "Historical HarnessVLA used a Planner turn limit rather than these task horizons.",
+    "Historical RPent skill checked current success at chunk boundaries; this rollout uses any native success within the chunk.",
+    "Matching task and seed does not establish identical initial scenes.",
+    "RoboCasa Counter.get_reset_regions deduplicates XML Element objects with a set; object-identity ordering may change regions and placement retries across processes even with PYTHONHASHSEED=0. No strict initial-scene equivalence is claimed."
+  ]
+}
